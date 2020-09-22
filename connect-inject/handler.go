@@ -380,10 +380,61 @@ func (h *Handler) Mutate(req *v1beta1.AdmissionRequest) *v1beta1.AdmissionRespon
 				},
 			}
 		}
+		policyRule := fmt.Sprintf(`namespace "%s" {
+service_prefix "" {
+    policy = "write"
+}}
+node_prefix "" {
+    policy = "read"
+}`, h.consulNamespace(req.Namespace))
+		// create policy
+		// TODO: add datacenter bits
+		policyName := "connect-inject-default"
+		policyTemplate := api.ACLPolicy{
+			Name:        policyName,
+			Description: "connect-inject-default-policy",
+			Rules:       policyRule,
+			Datacenters: nil,
+		}
+		// TODO add error handling
+		_, _, err := h.ConsulClient.ACL().PolicyCreate(&policyTemplate, &api.WriteOptions{})
+		if err != nil {
+			h.Log.Error("======= unable to create policy %v", err)
+		}
+		policies := []*api.ACLRolePolicyLink{{Name: policyName}}
+		// create role
+		role := api.ACLRole{
+			Name:              "connect-inject-default",
+			Description:       "connect-inject-default-role",
+			Policies:          policies,
+		}
+		_, _, err = h.ConsulClient.ACL().RoleCreate(&role, &api.WriteOptions{})
+		if err != nil {
+			h.Log.Error("======= unable to create role %v", err)
+		}
+		// Create the binding rule.
+		abr := api.ACLBindingRule{
+			Description: "Kubernetes binding rule for this namespace",
+			AuthMethod:  "consul-k8s-auth-method",
+			BindType:    api.BindingRuleBindTypeRole,
+			BindName:    "connect-inject-default",
+			Selector:    "serviceaccount.namespace=="+req.Namespace,
+		}
+		_, _, err = h.ConsulClient.ACL().BindingRuleCreate(&abr, nil)
+		if err != nil {
+			h.Log.Error("======= unable to create binding rule %v", err)
+		}
+
 	}
 
 	return resp
 }
+
+
+
+
+
+
 
 func (h *Handler) shouldInject(pod *corev1.Pod, namespace string) (bool, error) {
 	// Don't inject in the Kubernetes system namespaces

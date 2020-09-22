@@ -205,6 +205,7 @@ func (c *Command) injectRules() (string, error) {
 	injectRulesTpl := `
 {{- if .EnableNamespaces }}
 operator = "write"
+acl = "write"
 {{- end }}
 `
 	return c.renderRules(injectRulesTpl)

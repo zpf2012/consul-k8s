@@ -197,11 +197,5 @@ func (c *Command) createAuthMethodTmpl(authMethodName string) (api.ACLAuthMethod
 		},
 	}
 
-	// Add options for mirroring namespaces
-	if c.flagEnableNamespaces && c.flagEnableInjectK8SNSMirroring {
-		authMethodTmpl.Config["MapNamespaces"] = true
-		authMethodTmpl.Config["ConsulNamespacePrefix"] = c.flagInjectK8SNSMirroringPrefix
-	}
-
 	return authMethodTmpl, nil
 }
