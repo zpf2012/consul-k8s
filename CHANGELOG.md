@@ -1,11 +1,99 @@
 ## UNRELEASED
 
+## 0.21.0 (November 25, 2020)
+
+IMPROVEMENTS:
+* Connect: Add `-log-level` flag to `inject-connect` command. [[GH-400](https://github.com/hashicorp/consul-k8s/pull/400)]
+* Connect: Ensure `consul-connect-lifecycle-sidecar` container shuts down gracefully upon receiving `SIGTERM`. [[GH-389](https://github.com/hashicorp/consul-k8s/pull/389)]
+* Connect: **(Consul Enterprise only)** give more descriptive error message if using Consul namespaces with a Consul installation that doesn't support namespaces. [[GH-399](https://github.com/hashicorp/consul-k8s/pull/399)]
+
+## 0.20.0 (November 12, 2020)
+
+FEATURES:
+* Connect: Support Kubernetes health probe synchronization with Consul for connect injected pods. [[GH-363](https://github.com/hashicorp/consul-k8s/pull/363)]
+    * Adds a new controller to the connect-inject webhook which is responsible for synchronizing Kubernetes pod health checks with Consul service instance health checks.
+      A Consul health check is registered for each connect-injected pod which mirrors the pod's Readiness status to Consul. This modifies connect routing to only
+      pods which have passing Kubernetes health checks. See breaking changes for more information.
+    * Adds a new label to connect-injected pods which mirrors the `consul.hashicorp.com/connect-inject-status` annotation.
+    * **(Consul Enterprise only)** Adds a new annotation to connect-injected pods when namespaces are enabled: `consul.hashicorp.com/consul-namespace`. [[GH-376](https://github.com/hashicorp/consul-k8s/pull/376)]
+
+BREAKING CHANGES:
+* Connect: With the addition of the connect-inject health checks controller any connect services which have failing Kubernetes readiness
+  probes will no longer be routable through connect until their Kubernetes health probes are passing.
+  Previously, if any connect services were failing their Kubernetes readiness checks they were still routable through connect.
+  Users should verify that their connect services are passing Kubernetes readiness probes prior to using health checks synchronization.
+
+DEPRECATIONS:
+* `create-inject-token` in the server-acl-init command has been un-deprecated.
+  `-create-inject-auth-method` has been deprecated and replaced by `-create-inject-token`.
+  
+  `-create-inject-namespace-token` in the server-acl-init command has been deprecated. Please use `-create-inject-token` and `-enable-namespaces` flags
+  to achieve the same functionality. [[GH-368](https://github.com/hashicorp/consul-k8s/pull/368)]
+
+IMPROVEMENTS:
+* Connect: support passing extra arguments to the envoy binary. [[GH-378](https://github.com/hashicorp/consul-k8s/pull/378)]
+    
+    Arguments can be passed in 2 ways:
+    * via a flag to the consul-k8s inject-connect command,
+      e.g. `consul-k8s inject-connect -envoy-extra-args="--log-level debug --disable-hot-restart"`
+    * via pod annotations,
+      e.g. `consul.hashicorp.com/envoy-extra-args: "--log-level debug --disable-hot-restart"`
+      
+* CRDs:
+   * Add Age column to CRDs. [[GH-365](https://github.com/hashicorp/consul-k8s/pull/365)]
+   * Add validations and field descriptions for ServiceIntentions CRD. [[GH-385](https://github.com/hashicorp/consul-k8s/pull/385)]
+   * Update CRD sync status if deletion in Consul fails. [[GH-365](https://github.com/hashicorp/consul-k8s/pull/365)]
+
+BUG FIXES:
+* Federation: **(Consul Enterprise only)** ensure replication ACL token can replicate policies and tokens in Consul namespaces other than `default`. [[GH-364](https://github.com/hashicorp/consul-k8s/issues/364)]
+* CRDs: **(Consul Enterprise only)** validate custom resources can only set namespace fields if Consul namespaces are enabled. [[GH-375](https://github.com/hashicorp/consul-k8s/pull/375)]
+* CRDs: Ensure ACL token is global so that secondary DCs can manage custom resources.
+  Without this fix, controllers running in secondary datacenters would get ACL errors. [[GH-369](https://github.com/hashicorp/consul-k8s/pull/369)]
+* CRDs: **(Consul Enterprise only)** Do not attempt to create a `*` namespace when service intentions specify `*` as `destination.namespace`. [[GH-382](https://github.com/hashicorp/consul-k8s/pull/382)]
+* CRDs: **(Consul Enterprise only)** Fix namespace support for ServiceIntentions CRD. [[GH-362](https://github.com/hashicorp/consul-k8s/pull/362)]
+* CRDs: Rename field namespaces -> namespace in ServiceResolver CRD. [[GH-365](https://github.com/hashicorp/consul-k8s/pull/365)]
+
+## 0.19.0 (October 12, 2020)
+
+FEATURES:
+* Add beta support for new commands `consul-k8s controller` and `consul-k8s webhook-cert-manager`. [[GH-353](https://github.com/hashicorp/consul-k8s/pull/353)]
+
+  `controller` will start a Kubernetes controller that acts on Consul
+  Custom Resource Definitions. The currently supported CRDs are:
+    * `ProxyDefaults` - https://www.consul.io/docs/agent/config-entries/proxy-defaults
+    * `ServiceDefaults` - https://www.consul.io/docs/agent/config-entries/service-defaults
+    * `ServiceSplitter` - https://www.consul.io/docs/agent/config-entries/service-splitter
+    * `ServiceRouter` - https://www.consul.io/docs/agent/config-entries/service-router
+    * `ServiceResolver` - https://www.consul.io/docs/agent/config-entries/service-resolver
+    * `ServiceIntentions` (requires Consul >= 1.9.0) - https://www.consul.io/docs/agent/config-entries/service-intentions
+   
+   See [https://www.consul.io/docs/k8s/crds](https://www.consul.io/docs/k8s/crds)
+   for more information on the CRD schemas. **Requires Consul >= 1.8.4**.
+   
+   `webhook-cert-manager` manages certificates for Kubernetes webhooks. It will
+   refresh expiring certificates and update corresponding secrets and mutating
+   webhook configurations.
+
+BREAKING CHANGES:
+* Connect: No longer set `--max-obj-name-len` flag when executing `envoy`. This flag
+  was [deprecated](https://www.envoyproxy.io/docs/envoy/latest/version_history/v1.11.0#deprecated)
+  in Envoy 1.11.0 and had no effect from then onwards. With Envoy >= 1.15.0 setting
+  this flag will result in an error, hence why we're removing it. [[GH-350](https://github.com/hashicorp/consul-k8s/pull/350)]
+
+  If you are running any Envoy version >= 1.11.0 this change will have no effect. If you
+  are running an Envoy version < 1.11.0 then you must upgrade Envoy to a newer
+  version. This can be done by setting the `global.imageEnvoy` key in the
+  Consul Helm chart.
+
 IMPROVEMENTS:
 
 * Add an ability to configure the synthetic Consul node name where catalog sync registers services. [[GH-312](https://github.com/hashicorp/consul-k8s/pull/312)]
   * Sync: Add `-consul-node-name` flag to the `sync-catalog` command to configure the Consul node name for syncing services to Consul.
   * ACLs: Add `-sync-consul-node-name` flag to the server-acl-init command so that it can create correct policy for the sync catalog.
 
+BUG FIXES:
+* Connect: use the first secret of type `kubernetes.io/service-account-token` when creating/updating auth method. [[GH-350](https://github.com/hashicorp/consul-k8s/pull/321)]
+  
 ## 0.18.1 (August 10, 2020)
 
 BUG FIXES:

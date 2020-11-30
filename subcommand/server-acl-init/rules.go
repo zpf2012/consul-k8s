@@ -7,11 +7,15 @@ import (
 )
 
 type rulesData struct {
-	EnableNamespaces               bool
-	ConsulSyncDestinationNamespace string
-	EnableSyncK8SNSMirroring       bool
-	SyncK8SNSMirroringPrefix       string
-	SyncConsulNodeName             string
+	EnableNamespaces        bool
+	SyncConsulDestNS        string
+	SyncEnableNSMirroring   bool
+	SyncNSMirroringPrefix   string
+	InjectConsulDestNS      string
+	InjectEnableNSMirroring bool
+	InjectNSMirroringPrefix string
+	SyncConsulNodeName      string
+	EnableHealthChecks      bool
 }
 
 type gatewayRulesData struct {
@@ -180,10 +184,10 @@ func (c *Command) syncRules() (string, error) {
   }
 {{- if .EnableNamespaces }}
 operator = "write"
-{{- if .EnableSyncK8SNSMirroring }}
-namespace_prefix "{{ .SyncK8SNSMirroringPrefix }}" {
+{{- if .SyncEnableNSMirroring }}
+namespace_prefix "{{ .SyncNSMirroringPrefix }}" {
 {{- else }}
-namespace "{{ .ConsulSyncDestinationNamespace }}" {
+namespace "{{ .SyncConsulDestNS }}" {
 {{- end }}
 {{- end }}
   node_prefix "" {
@@ -201,13 +205,27 @@ namespace "{{ .ConsulSyncDestinationNamespace }}" {
 }
 
 func (c *Command) injectRules() (string, error) {
-	// The Connect injector only needs permissions to create namespaces.
+	// The Connect injector needs permissions to create namespaces when namespaces are enabled
+	// and also create/update service checks when health checks are enabled.
 	injectRulesTpl := `
 {{- if .EnableNamespaces }}
 operator = "write"
 acl = "write"
 {{- end }}
-`
+{{- if .EnableHealthChecks }}
+node_prefix "" {
+  policy = "write"
+}
+{{- if .EnableNamespaces }}
+namespace_prefix "" {
+{{- end }}
+  service_prefix "" {
+    policy = "write"
+  }
+{{- if .EnableNamespaces }}
+}
+{{- end }}
+{{- end }}`
 	return c.renderRules(injectRulesTpl)
 }
 
@@ -220,7 +238,6 @@ func (c *Command) aclReplicationRules() (string, error) {
 	// datacenters during federation since in order to start ACL replication,
 	// we need a token with both replication and agent permissions.
 	aclReplicationRulesTpl := `
-acl = "write"
 operator = "write"
 agent_prefix "" {
   policy = "read"
@@ -231,6 +248,7 @@ node_prefix "" {
 {{- if .EnableNamespaces }}
 namespace_prefix "" {
 {{- end }}
+  acl = "write"
   service_prefix "" {
     policy = "read"
     intentions = "read"
@@ -242,13 +260,38 @@ namespace_prefix "" {
 	return c.renderRules(aclReplicationRulesTpl)
 }
 
+func (c *Command) controllerRules() (string, error) {
+	controllerRules := `
+operator = "write"
+{{- if .EnableNamespaces }}
+{{- if .InjectEnableNSMirroring }}
+namespace_prefix "{{ .InjectNSMirroringPrefix }}" {
+{{- else }}
+namespace "{{ .InjectConsulDestNS }}" {
+{{- end }}
+{{- end }}
+  service_prefix "" {
+    policy = "write"
+    intentions = "write"
+  }
+{{- if .EnableNamespaces }}
+}
+{{- end }}
+`
+	return c.renderRules(controllerRules)
+}
+
 func (c *Command) rulesData() rulesData {
 	return rulesData{
-		EnableNamespaces:               c.flagEnableNamespaces,
-		ConsulSyncDestinationNamespace: c.flagConsulSyncDestinationNamespace,
-		EnableSyncK8SNSMirroring:       c.flagEnableSyncK8SNSMirroring,
-		SyncK8SNSMirroringPrefix:       c.flagSyncK8SNSMirroringPrefix,
-		SyncConsulNodeName:             c.flagSyncConsulNodeName,
+		EnableNamespaces:        c.flagEnableNamespaces,
+		SyncConsulDestNS:        c.flagConsulSyncDestinationNamespace,
+		SyncEnableNSMirroring:   c.flagEnableSyncK8SNSMirroring,
+		SyncNSMirroringPrefix:   c.flagSyncK8SNSMirroringPrefix,
+		InjectConsulDestNS:      c.flagConsulInjectDestinationNamespace,
+		InjectEnableNSMirroring: c.flagEnableInjectK8SNSMirroring,
+		InjectNSMirroringPrefix: c.flagInjectK8SNSMirroringPrefix,
+		SyncConsulNodeName:      c.flagSyncConsulNodeName,
+		EnableHealthChecks:      c.flagEnableHealthChecks,
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const InjectInitContainerName = "consul-connect-inject-init"
+
 type initContainerCommandData struct {
 	ServiceName      string
 	ProxyServiceName string
@@ -187,7 +189,7 @@ func (h *Handler) containerInit(pod *corev1.Pod, k8sNamespace string) (corev1.Co
 	}
 
 	return corev1.Container{
-		Name:  "consul-connect-inject-init",
+		Name:  InjectInitContainerName,
 		Image: h.ImageConsul,
 		Env: []corev1.EnvVar{
 			{

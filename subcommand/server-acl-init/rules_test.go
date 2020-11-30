@@ -495,20 +495,50 @@ namespace_prefix "prefix-" {
 
 func TestInjectRules(t *testing.T) {
 	cases := []struct {
-		Name             string
-		EnableNamespaces bool
-		Expected         string
+		Name               string
+		EnableNamespaces   bool
+		EnableHealthChecks bool
+		Expected           string
 	}{
 		{
-			"Namespaces are disabled",
+			"Namespaces are disabled, health checks controller disabled",
+			false,
 			false,
 			"",
 		},
 		{
-			"Namespaces are enabled",
+			"Namespaces are enabled, health checks controller disabled",
 			true,
+			false,
 			`
 operator = "write"`,
+		},
+		{
+			"Namespaces are disabled, health checks controller enabled",
+			false,
+			true,
+			`
+node_prefix "" {
+  policy = "write"
+}
+  service_prefix "" {
+    policy = "write"
+  }`,
+		},
+		{
+			"Namespaces are enabled, health checks controller enabled",
+			true,
+			true,
+			`
+operator = "write"
+node_prefix "" {
+  policy = "write"
+}
+namespace_prefix "" {
+  service_prefix "" {
+    policy = "write"
+  }
+}`,
 		},
 	}
 
@@ -517,7 +547,8 @@ operator = "write"`,
 			require := require.New(t)
 
 			cmd := Command{
-				flagEnableNamespaces: tt.EnableNamespaces,
+				flagEnableNamespaces:   tt.EnableNamespaces,
+				flagEnableHealthChecks: tt.EnableHealthChecks,
 			}
 
 			injectorRules, err := cmd.injectRules()
@@ -537,14 +568,14 @@ func TestReplicationTokenRules(t *testing.T) {
 		{
 			"Namespaces are disabled",
 			false,
-			`acl = "write"
-operator = "write"
+			`operator = "write"
 agent_prefix "" {
   policy = "read"
 }
 node_prefix "" {
   policy = "write"
 }
+  acl = "write"
   service_prefix "" {
     policy = "read"
     intentions = "read"
@@ -553,8 +584,7 @@ node_prefix "" {
 		{
 			"Namespaces are enabled",
 			true,
-			`acl = "write"
-operator = "write"
+			`operator = "write"
 agent_prefix "" {
   policy = "read"
 }
@@ -562,6 +592,7 @@ node_prefix "" {
   policy = "write"
 }
 namespace_prefix "" {
+  acl = "write"
   service_prefix "" {
     policy = "read"
     intentions = "read"
@@ -579,6 +610,82 @@ namespace_prefix "" {
 			replicationTokenRules, err := cmd.aclReplicationRules()
 			require.NoError(err)
 			require.Equal(tt.Expected, replicationTokenRules)
+		})
+	}
+}
+
+func TestControllerRules(t *testing.T) {
+	cases := []struct {
+		Name             string
+		EnableNamespaces bool
+		DestConsulNS     string
+		Mirroring        bool
+		MirroringPrefix  string
+		Expected         string
+	}{
+		{
+			Name:             "namespaces=disabled",
+			EnableNamespaces: false,
+			Expected: `operator = "write"
+  service_prefix "" {
+    policy = "write"
+    intentions = "write"
+  }`,
+		},
+		{
+			Name:             "namespaces=enabled, consulDestNS=consul",
+			EnableNamespaces: true,
+			DestConsulNS:     "consul",
+			Expected: `operator = "write"
+namespace "consul" {
+  service_prefix "" {
+    policy = "write"
+    intentions = "write"
+  }
+}`,
+		},
+		{
+			Name:             "namespaces=enabled, mirroring=true",
+			EnableNamespaces: true,
+			Mirroring:        true,
+			Expected: `operator = "write"
+namespace_prefix "" {
+  service_prefix "" {
+    policy = "write"
+    intentions = "write"
+  }
+}`,
+		},
+		{
+			Name:             "namespaces=enabled, mirroring=true, mirroringPrefix=prefix-",
+			EnableNamespaces: true,
+			Mirroring:        true,
+			MirroringPrefix:  "prefix-",
+			Expected: `operator = "write"
+namespace_prefix "prefix-" {
+  service_prefix "" {
+    policy = "write"
+    intentions = "write"
+  }
+}`,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.Name, func(t *testing.T) {
+			require := require.New(t)
+
+			cmd := Command{
+				flagEnableNamespaces:                 tt.EnableNamespaces,
+				flagConsulInjectDestinationNamespace: tt.DestConsulNS,
+				flagEnableInjectK8SNSMirroring:       tt.Mirroring,
+				flagInjectK8SNSMirroringPrefix:       tt.MirroringPrefix,
+			}
+
+			rules, err := cmd.controllerRules()
+
+			require.NoError(err)
+			require.Equal(tt.Expected, rules)
 		})
 	}
 }

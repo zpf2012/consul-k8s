@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/hashicorp/consul-k8s/namespaces"
 	"github.com/hashicorp/consul/api"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,7 +19,7 @@ const defaultKubernetesHost = "https://kubernetes.default.svc"
 
 // configureConnectInject sets up auth methods so that connect injection will
 // work.
-func (c *Command) configureConnectInject(consulClient *api.Client) error {
+func (c *Command) configureConnectInjectAuthMethod(consulClient *api.Client) error {
 
 	authMethodName := c.withPrefix("k8s-auth-method")
 
@@ -46,7 +47,7 @@ func (c *Command) configureConnectInject(consulClient *api.Client) error {
 			err = c.untilSucceeds(fmt.Sprintf("checking or creating namespace %s",
 				c.flagConsulInjectDestinationNamespace),
 				func() error {
-					err := c.checkAndCreateNamespace(c.flagConsulInjectDestinationNamespace, consulClient)
+					_, err := namespaces.EnsureExists(consulClient, c.flagConsulInjectDestinationNamespace, "cross-namespace-policy")
 					return err
 				})
 			if err != nil {

@@ -8,17 +8,21 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
-	"github.com/deckarep/golang-set"
-	"github.com/hashicorp/consul-k8s/connect-inject"
+	connectinject "github.com/hashicorp/consul-k8s/connect-inject"
 	"github.com/hashicorp/consul-k8s/helper/cert"
+	"github.com/hashicorp/consul-k8s/helper/controller"
+	"github.com/hashicorp/consul-k8s/subcommand/common"
 	"github.com/hashicorp/consul-k8s/subcommand/flags"
 	"github.com/hashicorp/consul/api"
-	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/cli"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -44,6 +48,8 @@ type Command struct {
 	flagWriteServiceDefaults bool   // True to enable central config injection
 	flagDefaultProtocol      string // Default protocol for use with central config
 	flagConsulCACert         string // [Deprecated] Path to CA Certificate to use when communicating with Consul clients
+	flagEnvoyExtraArgs       string // Extra envoy args when starting envoy
+	flagLogLevel             string
 
 	// Flags to support namespaces
 	flagEnableNamespaces           bool     // Use namespacing on all components
@@ -53,6 +59,10 @@ type Command struct {
 	flagEnableK8SNSMirroring       bool     // Enables mirroring of k8s namespaces into Consul
 	flagK8SNSMirroringPrefix       string   // Prefix added to Consul namespaces created when mirroring
 	flagCrossNamespaceACLPolicy    string   // The name of the ACL policy to add to every created namespace if ACLs are enabled
+
+	// Flags to enable connect-inject health checks.
+	flagEnableHealthChecks          bool          // Start the health check controller.
+	flagHealthChecksReconcilePeriod time.Duration // Period for health check reconcile.
 
 	// Proxy resource settings.
 	flagDefaultSidecarProxyCPULimit      string
@@ -78,9 +88,10 @@ type Command struct {
 	consulClient *api.Client
 	clientset    kubernetes.Interface
 
-	once sync.Once
-	help string
-	cert atomic.Value
+	sigCh chan os.Signal
+	once  sync.Once
+	help  string
+	cert  atomic.Value
 }
 
 func (c *Command) init() {
@@ -101,6 +112,8 @@ func (c *Command) init() {
 		"Docker image for Envoy. Defaults to envoyproxy/envoy-alpine:v1.13.0.")
 	c.flagSet.StringVar(&c.flagConsulK8sImage, "consul-k8s-image", "",
 		"Docker image for consul-k8s. Used for the connect sidecar.")
+	c.flagSet.StringVar(&c.flagEnvoyExtraArgs, "envoy-extra-args", "",
+		"Extra envoy command line args to be set when starting envoy (e.g \"--log-level debug --disable-hot-restart\").")
 	c.flagSet.StringVar(&c.flagACLAuthMethod, "acl-auth-method", "",
 		"The name of the Kubernetes Auth Method to use for connectInjection if ACLs are enabled.")
 	c.flagSet.BoolVar(&c.flagWriteServiceDefaults, "enable-central-config", false,
@@ -113,18 +126,24 @@ func (c *Command) init() {
 		"K8s namespaces to explicitly allow. May be specified multiple times.")
 	c.flagSet.Var((*flags.AppendSliceValue)(&c.flagDenyK8sNamespacesList), "deny-k8s-namespace",
 		"K8s namespaces to explicitly deny. Takes precedence over allow. May be specified multiple times.")
+	c.flagSet.BoolVar(&c.flagEnableHealthChecks, "enable-health-checks-controller", false,
+		"Enables health checks controller.")
+	c.flagSet.DurationVar(&c.flagHealthChecksReconcilePeriod, "health-checks-reconcile-period", 1*time.Minute, "Reconcile period for health checks controller.")
 	c.flagSet.BoolVar(&c.flagEnableNamespaces, "enable-namespaces", false,
-		"[Enterprise Only] Enables namespaces, in either a single Consul namespace or mirrored")
+		"[Enterprise Only] Enables namespaces, in either a single Consul namespace or mirrored.")
 	c.flagSet.StringVar(&c.flagConsulDestinationNamespace, "consul-destination-namespace", "default",
-		"[Enterprise Only] Defines which Consul namespace to register all injected services into. If '-enable-namespace-mirroring' "+
+		"[Enterprise Only] Defines which Consul namespace to register all injected services into. If '-enable-k8s-namespace-mirroring' "+
 			"is true, this is not used.")
 	c.flagSet.BoolVar(&c.flagEnableK8SNSMirroring, "enable-k8s-namespace-mirroring", false, "[Enterprise Only] Enables "+
-		"k8s namespace mirroring")
+		"k8s namespace mirroring.")
 	c.flagSet.StringVar(&c.flagK8SNSMirroringPrefix, "k8s-namespace-mirroring-prefix", "",
 		"[Enterprise Only] Prefix that will be added to all k8s namespaces mirrored into Consul if mirroring is enabled.")
 	c.flagSet.StringVar(&c.flagCrossNamespaceACLPolicy, "consul-cross-namespace-acl-policy", "",
 		"[Enterprise Only] Name of the ACL policy to attach to all created Consul namespaces to allow service "+
 			"discovery across Consul namespaces. Only necessary if ACLs are enabled.")
+	c.flagSet.StringVar(&c.flagLogLevel, "log-level", "info",
+		"Log verbosity level. Supported values (in order of detail) are \"trace\", "+
+			"\"debug\", \"info\", \"warn\", and \"error\".")
 
 	// Proxy sidecar resource setting flags.
 	c.flagSet.StringVar(&c.flagDefaultSidecarProxyCPURequest, "default-sidecar-proxy-cpu-request", "", "Default sidecar proxy CPU request.")
@@ -145,8 +164,16 @@ func (c *Command) init() {
 	c.flagSet.StringVar(&c.flagLifecycleSidecarMemoryLimit, "lifecycle-sidecar-memory-limit", "50Mi", "Lifecycle sidecar memory limit.")
 
 	c.http = &flags.HTTPFlags{}
+
 	flags.Merge(c.flagSet, c.http.Flags())
 	c.help = flags.Usage(help, c.flagSet)
+
+	// Wait on an interrupt or terminate for exit, be sure to init it before running
+	// the controller so that we don't receive an interrupt before it's ready.
+	if c.sigCh == nil {
+		c.sigCh = make(chan os.Signal, 1)
+		signal.Notify(c.sigCh, syscall.SIGINT, syscall.SIGTERM)
+	}
 }
 
 func (c *Command) Run(args []string) int {
@@ -161,9 +188,14 @@ func (c *Command) Run(args []string) int {
 		return 1
 	}
 
+	logger, err := common.Logger(c.flagLogLevel)
+	if err != nil {
+		c.UI.Error(err.Error())
+		return 1
+	}
+
 	// Proxy resources
 	var sidecarProxyCPULimit, sidecarProxyCPURequest, sidecarProxyMemoryLimit, sidecarProxyMemoryRequest resource.Quantity
-	var err error
 	if c.flagDefaultSidecarProxyCPURequest != "" {
 		sidecarProxyCPURequest, err = resource.ParseQuantity(c.flagDefaultSidecarProxyCPURequest)
 		if err != nil {
@@ -269,7 +301,7 @@ func (c *Command) Run(args []string) int {
 
 	// Create the certificate notifier so we can update for certificates,
 	// then start all the background routines for updating certificates.
-	certCh := make(chan cert.Bundle)
+	certCh := make(chan cert.MetaBundle)
 	certNotify := &cert.Notify{Ch: certCh, Source: certSource}
 	defer certNotify.Stop()
 	go certNotify.Start(context.Background())
@@ -278,20 +310,15 @@ func (c *Command) Run(args []string) int {
 	go c.certWatcher(ctx, certCh, c.clientset)
 
 	// Convert allow/deny lists to sets
-	allowSet := mapset.NewSet()
-	denySet := mapset.NewSet()
-	for _, allow := range c.flagAllowK8sNamespacesList {
-		allowSet.Add(allow)
-	}
-	for _, deny := range c.flagDenyK8sNamespacesList {
-		denySet.Add(deny)
-	}
+	allowK8sNamespaces := flags.ToSet(c.flagAllowK8sNamespacesList)
+	denyK8sNamespaces := flags.ToSet(c.flagDenyK8sNamespacesList)
 
 	// Build the HTTP handler and server
 	injector := connectinject.Handler{
 		ConsulClient:               c.consulClient,
 		ImageConsul:                c.flagConsulImage,
 		ImageEnvoy:                 c.flagEnvoyImage,
+		EnvoyExtraArgs:             c.flagEnvoyExtraArgs,
 		ImageConsulK8S:             c.flagConsulK8sImage,
 		RequireAnnotation:          !c.flagDefaultInject,
 		AuthMethod:                 c.flagACLAuthMethod,
@@ -305,13 +332,13 @@ func (c *Command) Run(args []string) int {
 		InitContainerResources:     initResources,
 		LifecycleSidecarResources:  lifecycleResources,
 		EnableNamespaces:           c.flagEnableNamespaces,
-		AllowK8sNamespacesSet:      allowSet,
-		DenyK8sNamespacesSet:       denySet,
+		AllowK8sNamespacesSet:      allowK8sNamespaces,
+		DenyK8sNamespacesSet:       denyK8sNamespaces,
 		ConsulDestinationNamespace: c.flagConsulDestinationNamespace,
 		EnableK8SNSMirroring:       c.flagEnableK8SNSMirroring,
 		K8SNSMirroringPrefix:       c.flagK8SNSMirroringPrefix,
 		CrossNamespaceACLPolicy:    c.flagCrossNamespaceACLPolicy,
-		Log:                        hclog.Default().Named("handler"),
+		Log:                        logger.Named("handler"),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mutate", injector.Handle)
@@ -323,13 +350,89 @@ func (c *Command) Run(args []string) int {
 		TLSConfig: &tls.Config{GetCertificate: c.getCertificate},
 	}
 
-	c.UI.Info(fmt.Sprintf("Listening on %q...", c.flagListen))
-	if err := server.ListenAndServeTLS("", ""); err != nil {
-		c.UI.Error(fmt.Sprintf("Error listening: %s", err))
-		return 1
-	}
+	if c.flagEnableHealthChecks {
+		// Channel used for health checks
+		// also check to see if we should enable TLS.
+		consulAddr := os.Getenv(api.HTTPAddrEnvName)
+		if consulAddr == "" {
+			c.UI.Error(fmt.Sprintf("%s is not specified", api.HTTPAddrEnvName))
+			return 1
+		}
+		consulUrl, err := url.Parse(consulAddr)
+		if err != nil {
+			c.UI.Error(fmt.Sprintf("Error parsing %s: %s", api.HTTPAddrEnvName, err))
+			return 1
+		}
 
+		serverErrors := make(chan error)
+		go func() {
+			c.UI.Info(fmt.Sprintf("Listening on %q...", c.flagListen))
+			if err := server.ListenAndServeTLS("", ""); err != nil {
+				c.UI.Error(fmt.Sprintf("Error listening: %s", err))
+				serverErrors <- err
+			}
+		}()
+
+		healthResource := connectinject.HealthCheckResource{
+			Log:                 logger.Named("healthCheckResource"),
+			KubernetesClientset: c.clientset,
+			ConsulUrl:           consulUrl,
+			Ctx:                 ctx,
+			ReconcilePeriod:     c.flagHealthChecksReconcilePeriod,
+		}
+
+		ctl := &controller.Controller{
+			Log:      logger.Named("healthCheckController"),
+			Resource: &healthResource,
+		}
+
+		// Start the health check controller, reconcile is started at the same time
+		// and new events will queue in the informer.
+		ctrlExitCh := make(chan error)
+		go func() {
+			ctl.Run(ctx.Done())
+			// If ctl.Run() exits before ctx is cancelled, then our health checks
+			// controller isn't running. In that case we need to shutdown since
+			// this is unrecoverable.
+			if ctx.Err() == nil {
+				ctrlExitCh <- fmt.Errorf("health checks controller exited unexpectedly")
+			}
+		}()
+
+		select {
+		// Interrupted/terminated, gracefully exit.
+		case sig := <-c.sigCh:
+			c.UI.Info(fmt.Sprintf("%s received, shutting down", sig))
+			if err := server.Close(); err != nil {
+				c.UI.Error(fmt.Sprintf("shutting down server: %v", err))
+				return 1
+			}
+			return 0
+
+		case <-serverErrors:
+			return 1
+
+		case err := <-ctrlExitCh:
+			c.UI.Error(fmt.Sprintf("controller error: %v", err))
+			return 1
+		}
+
+	} else {
+		c.UI.Info(fmt.Sprintf("Listening on %q...", c.flagListen))
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			c.UI.Error(fmt.Sprintf("Error listening: %s", err))
+			return 1
+		}
+	}
 	return 0
+}
+
+func (c *Command) interrupt() {
+	c.sendSignal(syscall.SIGINT)
+}
+
+func (c *Command) sendSignal(sig os.Signal) {
+	c.sigCh <- sig
 }
 
 func (c *Command) handleReady(rw http.ResponseWriter, req *http.Request) {
@@ -348,8 +451,8 @@ func (c *Command) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	return certRaw.(*tls.Certificate), nil
 }
 
-func (c *Command) certWatcher(ctx context.Context, ch <-chan cert.Bundle, clientset kubernetes.Interface) {
-	var bundle cert.Bundle
+func (c *Command) certWatcher(ctx context.Context, ch <-chan cert.MetaBundle, clientset kubernetes.Interface) {
+	var bundle cert.MetaBundle
 	for {
 		select {
 		case bundle = <-ch:
