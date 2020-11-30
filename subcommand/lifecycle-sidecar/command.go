@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/hashicorp/consul-k8s/subcommand/common"
 	"github.com/hashicorp/consul-k8s/subcommand/flags"
+	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/cli"
 )
 
@@ -29,10 +32,9 @@ type Command struct {
 	flagLogLevel      string
 
 	consulCommand []string
-
-	once  sync.Once
-	help  string
-	sigCh chan os.Signal
+	once          sync.Once
+	help          string
+	sigCh         chan os.Signal
 }
 
 func (c *Command) init() {
@@ -91,6 +93,13 @@ func (c *Command) Run(args []string) int {
 	c.consulCommand = append(c.consulCommand, c.parseConsulFlags()...)
 	c.consulCommand = append(c.consulCommand, c.flagServiceConfig)
 
+	// TODO: add configuration
+	server := metricsServer(logger)
+	logger.Info("created metrics server, about to serve :20100/stats/prometheus")
+	go func() {
+		server.ListenAndServe()
+	}()
+
 	// ctx that we pass in to the main work loop, signal handling is handled in another thread
 	// due to the length of time it can take for the cmd to complete causing synchronization issues
 	// on shutdown. Also passing a context in so that it can interrupt the cmd and exit cleanly.
@@ -100,9 +109,13 @@ func (c *Command) Run(args []string) int {
 		case sig := <-c.sigCh:
 			logger.Info(fmt.Sprintf("%s received, shutting down", sig))
 			cancelFunc()
+			// the metrics server should be shutdown when the context is
+			// canceled and the done channel is fired into.
+			server.Shutdown(ctx)
 			return
 		}
 	}()
+
 	// The main work loop. We continually re-register our service every
 	// syncPeriod. Consul is smart enough to know when the service hasn't changed
 	// and so won't update any indices. This means we won't be causing a lot
@@ -114,7 +127,6 @@ func (c *Command) Run(args []string) int {
 		start := time.Now()
 		cmd := exec.CommandContext(ctx, c.flagConsulBinary, c.consulCommand...)
 
-		// Run the command and record the stdout and stderr output
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			logger.Error("failed to sync service", "output", strings.TrimSpace(string(output)), "err", err, "duration", time.Since(start))
@@ -129,6 +141,41 @@ func (c *Command) Run(args []string) int {
 			return 0
 		}
 	}
+}
+
+// TODO: port configuration, tests
+func metricsServer(logger hclog.Logger) *http.Server {
+	netClient := &http.Client{
+		Timeout: time.Second * 10,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stats/prometheus", func(rw http.ResponseWriter, r *http.Request) {
+		logger.Info("handling /stats/prometheus")
+		envoyMetrics, err := netClient.Get("http://127.0.0.1:19000/stats/prometheus")
+		if err != nil {
+			logger.Warn("error scraping envoy proxy metrics", err.Error())
+			return
+		}
+		// TODO: make this scrape actual app metrics based on configuration
+		appMetrics, err := netClient.Get("http://127.0.0.1:19000/stats/prometheus")
+		if err != nil {
+			logger.Warn("error scraping app metrics: ", err.Error())
+			// may not want to just return if app metrics arent there
+			return
+		}
+
+		defer envoyMetrics.Body.Close()
+		defer appMetrics.Body.Close()
+
+		envoyMetricsBody, _ := ioutil.ReadAll(envoyMetrics.Body)
+		appMetricsBody, _ := ioutil.ReadAll(appMetrics.Body)
+		rw.Write(envoyMetricsBody)
+		rw.Write(appMetricsBody)
+	})
+
+	server := &http.Server{Addr: ":20100", Handler: mux}
+	return server
 }
 
 // validateFlags validates the flags.

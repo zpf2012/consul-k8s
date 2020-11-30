@@ -54,9 +54,10 @@ func (h *Handler) lifecycleSidecar(pod *corev1.Pod) corev1.Container {
 	}
 
 	return corev1.Container{
-		Name:  "consul-connect-lifecycle-sidecar",
-		Image: h.ImageConsulK8S,
-		Env:   envVariables,
+		Name:            "consul-connect-lifecycle-sidecar",
+		Image:           h.ImageConsulK8S,
+		ImagePullPolicy: "Always",
+		Env:             envVariables,
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      volumeName,

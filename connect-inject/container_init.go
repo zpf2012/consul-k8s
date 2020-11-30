@@ -301,6 +301,9 @@ services {
   }
 
   proxy {
+	config {
+		envoy_prometheus_bind_addr = "0.0.0.0:20200"
+	}
     destination_service_name = "{{ .ServiceName }}"
     destination_service_id = "${SERVICE_ID}"
     {{- if (gt .ServicePort 0) }}
