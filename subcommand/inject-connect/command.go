@@ -390,9 +390,9 @@ func (c *Command) Run(args []string) int {
 	klog.SetLogger(zapLogger)
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:           scheme,
-		Port:             9443,
 		LeaderElection:   false,
 		Logger:           zapLogger,
+		MetricsBindAddress: "0.0.0.0:9444",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
