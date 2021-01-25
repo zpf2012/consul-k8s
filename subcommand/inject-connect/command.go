@@ -20,16 +20,25 @@ import (
 	connectinject "github.com/hashicorp/consul-k8s/connect-inject"
 	"github.com/hashicorp/consul-k8s/helper/cert"
 	"github.com/hashicorp/consul-k8s/helper/controller"
+	crdController "github.com/hashicorp/consul-k8s/controller"
 	"github.com/hashicorp/consul-k8s/subcommand/common"
 	"github.com/hashicorp/consul-k8s/subcommand/flags"
 	"github.com/hashicorp/consul/api"
 	"github.com/mitchellh/cli"
+	"go.uber.org/zap/zapcore"
 	corev1 "k8s.io/api/core/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type Command struct {
@@ -92,6 +101,18 @@ type Command struct {
 	once  sync.Once
 	help  string
 	cert  atomic.Value
+}
+
+var (
+	scheme   = runtime.NewScheme()
+	setupLog = ctrl.Log.WithName("setup")
+)
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	//+kubebuilder:scaffold:scheme
 }
 
 func (c *Command) init() {
@@ -362,6 +383,34 @@ func (c *Command) Run(args []string) int {
 		Addr:      c.flagListen,
 		Handler:   handler,
 		TLSConfig: &tls.Config{GetCertificate: c.getCertificate},
+	}
+
+	zapLogger := zap.New(zap.UseDevMode(true), zap.Level(zapcore.InfoLevel))
+	ctrl.SetLogger(zapLogger)
+	klog.SetLogger(zapLogger)
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:           scheme,
+		Port:             9443,
+		LeaderElection:   false,
+		Logger:           zapLogger,
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to start manager")
+		return 1
+	}
+
+	if err = (&crdController.ServiceController{
+		Client:                mgr.GetClient(),
+		Log:                   ctrl.Log.WithName("controller").WithName("service-controller"),
+		Scheme:                mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", crdController.ServiceController{})
+		return 1
+	}
+
+	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+		setupLog.Error(err, "problem running manager")
+		return 1
 	}
 
 	if c.flagEnableHealthChecks {
