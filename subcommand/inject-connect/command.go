@@ -408,10 +408,18 @@ func (c *Command) Run(args []string) int {
 		return 1
 	}
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		return 1
-	}
+	// todo: figure out proper signal handling
+	go func() {
+		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+			setupLog.Error(err, "problem running manager")
+		}
+		// If ctl.Run() exits before ctx is cancelled, then our health checks
+		// controller isn't running. In that case we need to shutdown since
+		// this is unrecoverable.
+		//if ctx.Err() == nil {
+		//	ctrlExitCh <- fmt.Errorf("health checks controller exited unexpectedly")
+		//}
+	}()
 
 	if c.flagEnableHealthChecks {
 		// Channel used for health checks
