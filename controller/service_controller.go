@@ -25,7 +25,7 @@ func (r *ServiceController) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	if err != nil {
 		panic(err)
 	}
-	r.Log.Info("retrieved service from kube", svc)
+	r.Log.Info("retrieved service from kube", "svc", svc)
 
 	return ctrl.Result{}, nil
 }
