@@ -241,7 +241,7 @@ func testResource(client kubernetes.Interface) (Resource, map[string]interface{}
 			lock.Unlock()
 			return nil
 		},
-		func(key string) error {
+		func(key string, v interface{}) error {
 			lock.Lock()
 			delete(m, key)
 			lock.Unlock()

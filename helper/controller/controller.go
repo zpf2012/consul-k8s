@@ -170,7 +170,7 @@ func (c *Controller) processSingle(
 		c.Log.Debug("processing object", "key", keyRaw, "exists", exists)
 		c.Log.Trace("processing object", "object", item)
 		if !exists {
-			err = c.Resource.Delete(keyRaw)
+			err = c.Resource.Delete(keyRaw, item)
 		} else {
 			err = c.Resource.Upsert(keyRaw, item)
 		}

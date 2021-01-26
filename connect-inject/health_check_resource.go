@@ -28,6 +28,8 @@ const (
 	kubernetesSuccessReasonMsg = "Kubernetes health checks passing"
 
 	podPendingReasonMsg = "Pod is pending"
+
+	podDeletedReasonMsg = "Pod was deleted"
 )
 
 // ServiceNotFoundErr is returned when a Consul service instance is not registered.
@@ -76,7 +78,23 @@ func (h *HealthCheckResource) Run(stopCh <-chan struct{}) {
 
 // Delete is not implemented because it is handled by the preStop phase whereby all services
 // related to the pod are deregistered which also deregisters health checks.
-func (h *HealthCheckResource) Delete(string) error {
+func (h *HealthCheckResource) Delete(key string, obj interface{}) error {
+	if obj != nil {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			h.Log.Warn("unable to delete", "pod", pod)
+			return nil
+		}
+		healthCheckID := h.getConsulHealthCheckID(pod)
+		client, err := h.getConsulClient(pod)
+		if err != nil {
+			h.Log.Warn("unable to get Consul client connection to delete for", "name", pod.Name, "error", err)
+		}
+		err = h.updateConsulHealthCheckStatus(client, healthCheckID, api.HealthCritical, podDeletedReasonMsg)
+		if err != nil {
+			h.Log.Warn("error updating health check on delete:", "error", err)
+		}
+	}
 	return nil
 }
 
