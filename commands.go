@@ -4,6 +4,7 @@ import (
 	"os"
 
 	cmdACLInit "github.com/hashicorp/consul-k8s/subcommand/acl-init"
+	cmdConsulInit "github.com/hashicorp/consul-k8s/subcommand/consul-init"
 	cmdController "github.com/hashicorp/consul-k8s/subcommand/controller"
 	cmdCreateFederationSecret "github.com/hashicorp/consul-k8s/subcommand/create-federation-secret"
 	cmdDeleteCompletedJob "github.com/hashicorp/consul-k8s/subcommand/delete-completed-job"
@@ -29,6 +30,10 @@ func init() {
 	Commands = map[string]cli.CommandFactory{
 		"acl-init": func() (cli.Command, error) {
 			return &cmdACLInit.Command{UI: ui}, nil
+		},
+
+		"consul-init": func() (cli.Command, error) {
+			return &cmdConsulInit.Command{UI: ui}, nil
 		},
 
 		"inject-connect": func() (cli.Command, error) {
