@@ -277,7 +277,7 @@ func (c *Command) Run(args []string) int {
 	}
 
 	// create Consul API config object
-	cfg := api.DefaultConfig()
+	cfg := consul.DefaultConfig()
 	c.http.MergeOntoConfig(cfg)
 	if cfg.TLSConfig.CAFile == "" && c.flagConsulCACert != "" {
 		cfg.TLSConfig.CAFile = c.flagConsulCACert

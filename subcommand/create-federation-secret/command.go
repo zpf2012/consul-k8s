@@ -412,7 +412,7 @@ func (c *Command) consulDatacenter(logger hclog.Logger) string {
 // validateCAFileFlag returns an error if the -ca-file flag (or its env var
 // CONSUL_CACERT) isn't set or the file it points to can't be read.
 func (c *Command) validateCAFileFlag() error {
-	cfg := api.DefaultConfig()
+	cfg := consul.DefaultConfig()
 	c.http.MergeOntoConfig(cfg)
 	if cfg.TLSConfig.CAFile == "" {
 		return errors.New("-ca-file or CONSUL_CACERT must be set")

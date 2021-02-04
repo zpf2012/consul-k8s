@@ -128,7 +128,7 @@ func (c *Command) Run(args []string) int {
 func (c *Command) consulClient(logger hclog.Logger) (*api.Client, error) {
 	// Create default Consul config.
 	// This will also read any environment variables.
-	cfg := api.DefaultConfig()
+	cfg := consul.DefaultConfig()
 
 	// change the scheme to HTTPS
 	// since we don't want to send unencrypted requests

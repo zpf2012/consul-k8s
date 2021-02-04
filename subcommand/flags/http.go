@@ -94,7 +94,7 @@ func (f *HTTPFlags) ReadTokenFile() (string, error) {
 }
 
 func (f *HTTPFlags) APIClient() (*api.Client, error) {
-	c := api.DefaultConfig()
+	c := consul.DefaultConfig()
 
 	f.MergeOntoConfig(c)
 

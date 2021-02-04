@@ -274,7 +274,7 @@ func (h *HealthCheckResource) getReadyStatusAndReason(pod *corev1.Pod) (string, 
 // getConsulClient returns an *api.Client that points at the consul agent local to the pod.
 func (h *HealthCheckResource) getConsulClient(pod *corev1.Pod) (*api.Client, error) {
 	newAddr := fmt.Sprintf("%s://%s:%s", h.ConsulUrl.Scheme, pod.Status.HostIP, h.ConsulUrl.Port())
-	localConfig := api.DefaultConfig()
+	localConfig := consul.DefaultConfig()
 	localConfig.Address = newAddr
 	if pod.Annotations[annotationConsulNamespace] != "" {
 		localConfig.Namespace = pod.Annotations[annotationConsulNamespace]
