@@ -463,10 +463,14 @@ func (c *Command) Run(args []string) int {
 		}
 
 		if err = (&connectinject.EndpointsController{
-			ConsulClient: c.consulClient,
-			Client:       mgr.GetClient(),
-			Log:          ctrl.Log.WithName("controller").WithName("endpoints-controller"),
-			Scheme:       mgr.GetScheme(),
+			ConsulClient:          c.consulClient,
+			ConsulScheme:          consulURL.Scheme,
+			ConsulPort:            consulURL.Port(),
+			AllowK8sNamespacesSet: allowK8sNamespaces,
+			DenyK8sNamespacesSet:  denyK8sNamespaces,
+			Client:                mgr.GetClient(),
+			Log:                   ctrl.Log.WithName("controller").WithName("endpoints-controller"),
+			Scheme:                mgr.GetScheme(),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", connectinject.EndpointsController{})
 			return 1
