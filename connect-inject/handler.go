@@ -215,6 +215,10 @@ type Handler struct {
 
 	// Log
 	Log hclog.Logger
+
+	RootServiceAccountName string
+	Datacenter             string
+	ResourcePrefix         string
 }
 
 // Handle is the http.HandlerFunc implementation that actually handles the
@@ -457,6 +461,48 @@ func (h *Handler) Mutate(req *v1beta1.AdmissionRequest) *v1beta1.AdmissionRespon
 				Result: &metav1.Status{
 					Message: fmt.Sprintf("Error checking or creating namespace: %s", err),
 				},
+			}
+		}
+		if h.EnableK8SNSMirroring && h.RootServiceAccountName != "" {
+			consulNS := h.consulNamespace(req.Namespace)
+			policyRule := fmt.Sprintf(`namespace "%s" {
+service_prefix "" {
+   policy = "write"
+}}`, consulNS)
+			// create policy
+			name := fmt.Sprintf("connect-app-%s", consulNS)
+			policyTemplate := api.ACLPolicy{
+				Name:        name,
+				Description: fmt.Sprintf("register any service name in namespace %s", consulNS),
+				Rules:       policyRule,
+				Datacenters: []string{h.Datacenter},
+			}
+			// TODO add error handling
+			_, _, err := h.ConsulClient.ACL().PolicyCreate(&policyTemplate, &api.WriteOptions{})
+			if err != nil {
+				h.Log.Error("======= unable to create policy %v", err)
+			}
+			// create role
+			role := api.ACLRole{
+				Name:        name,
+				Description: "connect apps",
+				Policies:    []*api.ACLRolePolicyLink{{Name: name}},
+			}
+			_, _, err = h.ConsulClient.ACL().RoleCreate(&role, &api.WriteOptions{})
+			if err != nil {
+				h.Log.Error("======= unable to create role %v", err)
+			}
+			// Create the binding rule.
+			abr := api.ACLBindingRule{
+				Description: "Kubernetes binding rule for this namespace",
+				AuthMethod:  fmt.Sprintf("%s-k8s-auth-method", h.ResourcePrefix),
+				BindType:    api.BindingRuleBindTypeRole,
+				BindName:    name,
+				Selector:    fmt.Sprintf("serviceaccount.namespace==%s and serviceaccount.name==default", consulNS),
+			}
+			_, _, err = h.ConsulClient.ACL().BindingRuleCreate(&abr, nil)
+			if err != nil {
+				h.Log.Error("======= unable to create binding rule %v", err)
 			}
 		}
 	}

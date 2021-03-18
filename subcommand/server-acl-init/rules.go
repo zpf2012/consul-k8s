@@ -213,6 +213,7 @@ func (c *Command) injectRules() (string, error) {
 	injectRulesTpl := `
 {{- if .EnableNamespaces }}
 operator = "write"
+acl = "write"
 {{- end }}
 {{- if (or .EnableHealthChecks .EnableCleanupController) }}
 node_prefix "" {

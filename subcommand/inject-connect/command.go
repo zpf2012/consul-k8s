@@ -36,21 +36,24 @@ import (
 type Command struct {
 	UI cli.Ui
 
-	flagListen               string
-	flagAutoName             string // MutatingWebhookConfiguration for updating
-	flagAutoHosts            string // SANs for the auto-generated TLS cert.
-	flagCertFile             string // TLS cert for listening (PEM)
-	flagKeyFile              string // TLS cert private key (PEM)
-	flagDefaultInject        bool   // True to inject by default
-	flagConsulImage          string // Docker image for Consul
-	flagEnvoyImage           string // Docker image for Envoy
-	flagConsulK8sImage       string // Docker image for consul-k8s
-	flagACLAuthMethod        string // Auth Method to use for ACLs, if enabled
-	flagWriteServiceDefaults bool   // True to enable central config injection
-	flagDefaultProtocol      string // Default protocol for use with central config
-	flagConsulCACert         string // [Deprecated] Path to CA Certificate to use when communicating with Consul clients
-	flagEnvoyExtraArgs       string // Extra envoy args when starting envoy
-	flagLogLevel             string
+	flagListen                 string
+	flagAutoName               string // MutatingWebhookConfiguration for updating
+	flagAutoHosts              string // SANs for the auto-generated TLS cert.
+	flagCertFile               string // TLS cert for listening (PEM)
+	flagKeyFile                string // TLS cert private key (PEM)
+	flagDefaultInject          bool   // True to inject by default
+	flagConsulImage            string // Docker image for Consul
+	flagEnvoyImage             string // Docker image for Envoy
+	flagConsulK8sImage         string // Docker image for consul-k8s
+	flagACLAuthMethod          string // Auth Method to use for ACLs, if enabled
+	flagWriteServiceDefaults   bool   // True to enable central config injection
+	flagDefaultProtocol        string // Default protocol for use with central config
+	flagConsulCACert           string // [Deprecated] Path to CA Certificate to use when communicating with Consul clients
+	flagEnvoyExtraArgs         string // Extra envoy args when starting envoy
+	flagLogLevel               string
+	flagRootServiceAccountName string // Name of service account that can register as any service.
+	flagDatacenter             string // Name of Consul datacenter.
+	flagResourcePrefix         string // Prefix for Consul resources.
 
 	// Flags to support namespaces
 	flagEnableNamespaces           bool     // Use namespacing on all components
@@ -159,6 +162,12 @@ func (c *Command) init() {
 	c.flagSet.StringVar(&c.flagLogLevel, "log-level", "info",
 		"Log verbosity level. Supported values (in order of detail) are \"trace\", "+
 			"\"debug\", \"info\", \"warn\", and \"error\".")
+	c.flagSet.StringVar(&c.flagRootServiceAccountName, "root-service-account-name", "",
+		"Pods with this service account name can register as any service.")
+	c.flagSet.StringVar(&c.flagDatacenter, "datacenter", "",
+		"Consul datacenter name.")
+	c.flagSet.StringVar(&c.flagResourcePrefix, "resource-prefix", "",
+		"Prefix to use for resources.")
 
 	// Proxy sidecar resource setting flags.
 	c.flagSet.StringVar(&c.flagDefaultSidecarProxyCPURequest, "default-sidecar-proxy-cpu-request", "", "Default sidecar proxy CPU request.")
@@ -402,6 +411,9 @@ func (c *Command) Run(args []string) int {
 		K8SNSMirroringPrefix:        c.flagK8SNSMirroringPrefix,
 		CrossNamespaceACLPolicy:     c.flagCrossNamespaceACLPolicy,
 		Log:                         logger.Named("handler"),
+		RootServiceAccountName:      c.flagRootServiceAccountName,
+		Datacenter:                  c.flagDatacenter,
+		ResourcePrefix:              c.flagResourcePrefix,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mutate", injector.Handle)
