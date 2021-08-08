@@ -198,7 +198,7 @@ func TestConnectInjectNamespaces(t *testing.T) {
 				}
 
 				logger.Log(t, "creating intention")
-				_, err := consulClient.Connect().IntentionUpsert(intention, nil)
+				_, _, err := consulClient.Connect().IntentionCreate(intention, nil)
 				require.NoError(t, err)
 			}
 

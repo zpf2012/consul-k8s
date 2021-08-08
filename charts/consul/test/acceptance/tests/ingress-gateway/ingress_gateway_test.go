@@ -96,7 +96,7 @@ func TestIngressGateway(t *testing.T) {
 
 				// Now we create the allow intention.
 				logger.Log(t, "creating ingress-gateway => static-server intention")
-				_, err = consulClient.Connect().IntentionUpsert(&api.Intention{
+				_, _, err = consulClient.Connect().IntentionCreate(&api.Intention{
 					SourceName:      "ingress-gateway",
 					DestinationName: "static-server",
 					Action:          api.IntentionActionAllow,
