@@ -11,6 +11,7 @@ import (
 	cmdDeleteCompletedJob "github.com/hashicorp/consul-k8s/control-plane/subcommand/delete-completed-job"
 	cmdGetConsulClientCA "github.com/hashicorp/consul-k8s/control-plane/subcommand/get-consul-client-ca"
 	cmdInjectConnect "github.com/hashicorp/consul-k8s/control-plane/subcommand/inject-connect"
+	cmdRotatoe "github.com/hashicorp/consul-k8s/control-plane/subcommand/rotatoe"
 	cmdServerACLInit "github.com/hashicorp/consul-k8s/control-plane/subcommand/server-acl-init"
 	cmdServiceAddress "github.com/hashicorp/consul-k8s/control-plane/subcommand/service-address"
 	cmdSyncCatalog "github.com/hashicorp/consul-k8s/control-plane/subcommand/sync-catalog"
@@ -34,6 +35,10 @@ func init() {
 
 		"connect-init": func() (cli.Command, error) {
 			return &cmdConnectInit.Command{UI: ui}, nil
+		},
+
+		"rotate": func() (cli.Command, error) {
+			return &cmdRotatoe.Command{UI: ui}, nil
 		},
 
 		"inject-connect": func() (cli.Command, error) {
@@ -70,6 +75,10 @@ func init() {
 
 		"create-federation-secret": func() (cli.Command, error) {
 			return &cmdCreateFederationSecret.Command{UI: ui}, nil
+		},
+
+		"rotatoe": func() (cli.Command, error) {
+			return &cmdConnectInit.Command{UI: ui}, nil
 		},
 
 		"controller": func() (cli.Command, error) {

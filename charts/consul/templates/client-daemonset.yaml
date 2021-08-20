@@ -35,6 +35,11 @@ spec:
           {{- toYaml .Values.client.extraLabels | nindent 8 }}
         {{- end }}
       annotations:
+        "vault.hashicorp.com/agent-inject": "true"
+        "vault.hashicorp.com/agent-init-first": "true"
+        "vault.hashicorp.com/role": "consul-client"
+        "vault.hashicorp.com/agent-inject-secret-credentials.txt": "secret/consul/gossip"
+        "vault.hashicorp.com/agent-inject-template-credentials.txt": '{{ include "consul.gossipkey" . }}'
         "consul.hashicorp.com/connect-inject": "false"
         "consul.hashicorp.com/config-checksum": {{ include (print $.Template.BasePath "/client-config-configmap.yaml") . | sha256sum }}
         {{- if .Values.client.annotations }}
@@ -197,6 +202,8 @@ spec:
 
               {{ template "consul.extraconfig" }}
 
+              GOSSIP=`cat /vault/secrets/credentials.txt`
+
               exec /usr/local/bin/docker-entrypoint.sh consul agent \
                 -node="${NODE}" \
                 -advertise="${ADVERTISE_IP}" \
@@ -248,7 +255,7 @@ spec:
                 -datacenter={{ .Values.global.datacenter }} \
                 -data-dir=/consul/data \
                 {{- if (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey) }}
-                -encrypt="${GOSSIP_KEY}" \
+                -encrypt=${GOSSIP} \
                 {{- end }}
                 {{- if .Values.client.join }}
                 {{- range $value := .Values.client.join }}
@@ -362,7 +369,7 @@ spec:
           - "/bin/sh"
           - "-ec"
           - |
-            consul-k8s-control-plane acl-init \
+            consul-k8s acl-init \
               -secret-name="{{ template "consul.fullname" . }}-client-acl-token" \
               -k8s-namespace={{ .Release.Namespace }} \
               -init-type="client"

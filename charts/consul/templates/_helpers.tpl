@@ -36,6 +36,23 @@ Create chart name and version as used by the chart label.
 {{- printf "%s-helm" .Chart.Name | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "consul.server-ca" -}}
+{{- printf "{{- with secret \"pki_int/issue/consul-dc1\" \"common_name=server.dc1.consul\" \"ttl=24h\" -}} {{ .Data.issuing_ca }} {{- end -}}" -}}
+{{- end -}}
+
+{{- define "consul.server-key" -}}
+{{- printf "{{ with secret \"pki_int/issue/consul-dc1\" \"common_name=server.dc1.consul\" \"ttl=24h\" \"alt_names=localhost\" \"ip_sans=127.0.0.1\"}} {{ .Data.private_key }} {{ end }}" -}}
+{{- end -}}
+
+{{- define "consul.server-crt" -}}
+{{- printf "{{ with secret \"pki_int/issue/consul-dc1\" \"common_name=server.dc1.consul\" \"ttl=24h\" \"alt_names=localhost\" \"ip_sans=127.0.0.1\"}} {{ .Data.certificate }} {{ end }}" -}}
+{{- end -}}
+
+{{- define "consul.gossipkey" -}}
+{{- printf "{{- with secret \"secret/consul/gossip\" -}} {{ .Data.data.gossip }} {{- end -}}" -}}
+{{- end -}}
+
+
 {{/*
 Expand the name of the chart.
 */}}
@@ -87,7 +104,7 @@ This template is for an init container.
     - "/bin/sh"
     - "-ec"
     - |
-      consul-k8s-control-plane get-consul-client-ca \
+      consul-k8s get-consul-client-ca \
         -output-file=/consul/tls/client/ca/tls.crt \
         {{- if .Values.externalServers.enabled }}
         {{- if and .Values.externalServers.enabled (not .Values.externalServers.hosts) }}{{ fail "externalServers.hosts must be set if externalServers.enabled is true" }}{{ end -}}

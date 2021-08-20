@@ -5,6 +5,7 @@ require (
 	github.com/cenkalti/backoff v2.1.1+incompatible
 	github.com/deckarep/golang-set v1.7.1
 	github.com/digitalocean/godo v1.10.0 // indirect
+	github.com/docker/docker v20.10.8+incompatible
 	github.com/fatih/color v1.12.0 // indirect
 	github.com/go-logr/logr v0.4.0
 	github.com/google/go-cmp v0.5.6
