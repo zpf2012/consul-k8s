@@ -27,7 +27,6 @@ const (
 	FlagPreset    = "preset"
 	DefaultPreset = ""
 
-	FlagReleaseName    = "name"
 	DefaultReleaseName = "consul"
 
 	FlagValueFiles      = "config-file"
@@ -55,7 +54,6 @@ type Command struct {
 	set *flag.Sets
 
 	flagPreset          string
-	flagReleaseName     string
 	flagNamespace       string
 	flagDryRun          bool
 	flagSkipConfirm     bool
@@ -98,12 +96,6 @@ func (c *Command) init() {
 			Aliases: []string{"f"},
 			Target:  &c.flagValueFiles,
 			Usage:   "Path to a file to customize the installation, such as Consul Helm chart values file. Can be specified multiple times.",
-		})
-		f.StringVar(&flag.StringVar{
-			Name:    FlagReleaseName,
-			Target:  &c.flagReleaseName,
-			Default: DefaultReleaseName,
-			Usage:   "Name of the installation. This will be prefixed to resources installed on the cluster.",
 		})
 		f.StringVar(&flag.StringVar{
 			Name:    FlagNamespace,
@@ -305,7 +297,7 @@ func (c *Command) Run(args []string) int {
 	}
 
 	install := action.NewInstall(actionConfig)
-	install.ReleaseName = c.flagReleaseName
+	install.ReleaseName = DefaultReleaseName
 	install.Namespace = c.flagNamespace
 	install.CreateNamespace = true
 	install.ChartPathOptions.RepoURL = HelmRepository
@@ -317,9 +309,10 @@ func (c *Command) Run(args []string) int {
 		c.UI.Output("Dry run complete - installation can proceed.", terminal.WithInfoStyle())
 	}
 
+	// Print out the installation summary.
 	if !c.flagSkipConfirm {
 		c.UI.Output("Consul Installation Summary", terminal.WithHeaderStyle())
-		c.UI.Output("Installation name: %s", c.flagReleaseName, terminal.WithInfoStyle())
+		c.UI.Output("Installation name: %s", DefaultReleaseName, terminal.WithInfoStyle())
 		c.UI.Output("Namespace: %s", c.flagNamespace, terminal.WithInfoStyle())
 
 		valuesYaml, err := yaml.Marshal(vals)
@@ -332,8 +325,8 @@ func (c *Command) Run(args []string) int {
 		}
 	}
 
-	// Without informing the user, let global.Name be equal to consul if it hasn't been set already.
-	vals = mergeMaps(convert(setGlobalName), vals)
+	// Without informing the user, default global.name to consul if it hasn't been set already.
+	vals = mergeMaps(convert(globalNameConsul), vals)
 
 	if c.flagDryRun {
 		return 0

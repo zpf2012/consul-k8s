@@ -39,7 +39,7 @@ server:
   bootstrapExpect: 1
 `
 
-var setGlobalName = `
+var globalNameConsul = `
 global:
   name: consul
 `

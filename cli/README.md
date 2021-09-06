@@ -27,9 +27,6 @@ Flags:
   -config-file,-f=<string>
  	Path to a file to customize the installation, such as Consul Helm chart values file. Can be specified multiple times.
 
-  -name=<string>
- 	Name of the installation. This will be prefixed to resources installed on the cluster.
-
   -namespace=<string>
  	Namespace for the Consul installation. Defaults to “consul”.
 
