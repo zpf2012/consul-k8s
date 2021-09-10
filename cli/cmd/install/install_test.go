@@ -8,10 +8,15 @@ import (
 
 	"github.com/hashicorp/consul-k8s/cli/cmd/common"
 	"github.com/hashicorp/go-hclog"
+	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // Helper function which sets up a Command struct for you.
-func getInitializedCommand() *Command {
+func getInitializedCommand(t *testing.T) *Command {
+	t.Helper()
 	log := hclog.New(&hclog.LoggerOptions{
 		Name:   "cli",
 		Level:  hclog.Info,
@@ -34,8 +39,72 @@ func getInitializedCommand() *Command {
 
 // TestDebugger is used to play with install.go for ad-hoc testing.
 func TestDebugger(t *testing.T) {
-	c := getInitializedCommand()
-	c.Run([]string{"-skip-confirm", "-f=../../config.yaml"})
+	c := getInitializedCommand(t)
+	c.Run([]string{"-auto-approve", "-f=../../config.yaml"})
+}
+
+func TestCheckForPreviousPVCs(t *testing.T) {
+	c := getInitializedCommand(t)
+	c.kubernetes = fake.NewSimpleClientset()
+	pvc := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "consul-server-test1",
+		},
+	}
+	pvc2 := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "consul-server-test2",
+		},
+	}
+	c.kubernetes.CoreV1().PersistentVolumeClaims("default").Create(context.TODO(), pvc, metav1.CreateOptions{})
+	c.kubernetes.CoreV1().PersistentVolumeClaims("default").Create(context.TODO(), pvc2, metav1.CreateOptions{})
+	err := c.checkForPreviousPVCs()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "found PVCs from previous installations (default/consul-server-test1,default/consul-server-test2), delete before re-installing")
+
+	// Clear out the client and make sure the check now passes.
+	c.kubernetes = fake.NewSimpleClientset()
+	err = c.checkForPreviousPVCs()
+	require.NoError(t, err)
+
+	// Add a new irrelevant PVC and make sure the check continues to pass.
+	pvc = &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "irrelevant-pvc",
+		},
+	}
+	c.kubernetes.CoreV1().PersistentVolumeClaims("default").Create(context.TODO(), pvc, metav1.CreateOptions{})
+	err = c.checkForPreviousPVCs()
+	require.NoError(t, err)
+}
+
+func TestCheckForPreviousSecrets(t *testing.T) {
+	c := getInitializedCommand(t)
+	c.kubernetes = fake.NewSimpleClientset()
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-consul-bootstrap-acl-token",
+		},
+	}
+	c.kubernetes.CoreV1().Secrets("default").Create(context.TODO(), secret, metav1.CreateOptions{})
+	err := c.checkForPreviousSecrets()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "found consul-acl-bootstrap-token secret from previous installations: \"test-consul-bootstrap-acl-token\" in namespace \"default\". To delete, run kubectl delete secret test-consul-bootstrap-acl-token --namespace default")
+
+	// Clear out the client and make sure the check now passes.
+	c.kubernetes = fake.NewSimpleClientset()
+	err = c.checkForPreviousSecrets()
+	require.NoError(t, err)
+
+	// Add a new irrelevant secret and make sure the check continues to pass.
+	secret = &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "irrelevant-secret",
+		},
+	}
+	c.kubernetes.CoreV1().Secrets("default").Create(context.TODO(), secret, metav1.CreateOptions{})
+	err = c.checkForPreviousSecrets()
+	require.NoError(t, err)
 }
 
 // TestValidateFlags tests the validate flags function.
@@ -45,7 +114,7 @@ func TestValidateFlags(t *testing.T) {
 		input       []string
 		description string
 	}{
-		{[]string{"foo", "-skip-confirm"}, "Should disallow non-flag arguments."},
+		{[]string{"foo", "-auto-approve"}, "Should disallow non-flag arguments."},
 		{[]string{"-f='f.txt'", "-preset=demo"}, "Should disallow specifying both values file AND presets."},
 		{[]string{"-preset=foo"}, "Should error on invalid presets."},
 		{[]string{"-namespace=\" preset\""}, "Should error on an invalid namespace. If this failed, TestValidLabel() probably did too."},
@@ -53,9 +122,9 @@ func TestValidateFlags(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := getInitializedCommand()
+		c := getInitializedCommand(t)
 		t.Run(testCase.description, func(t *testing.T) {
-			if err := validateFlags(c, testCase.input); err == nil {
+			if err := c.validateFlags(testCase.input); err == nil {
 				t.Errorf("Test case should have failed.")
 			}
 		})

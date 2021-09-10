@@ -37,8 +37,8 @@ const (
 	FlagDryRun    = "dry-run"
 	DefaultDryRun = false
 
-	FlagSkipConfirm    = "skip-confirm"
-	DefaultSkipConfirm = false
+	FlagAutoApprove    = "auto-approve"
+	DefaultAutoApprove = false
 
 	FlagNamespace    = "namespace"
 	DefaultNamespace = "consul"
@@ -56,7 +56,7 @@ type Command struct {
 	flagPreset          string
 	flagNamespace       string
 	flagDryRun          bool
-	flagSkipConfirm     bool
+	flagAutoApprove     bool
 	flagValueFiles      []string
 	flagSetStringValues []string
 	flagSetValues       []string
@@ -80,9 +80,9 @@ func (c *Command) init() {
 	{
 		f := c.set.NewSet("Command Options")
 		f.BoolVar(&flag.BoolVar{
-			Name:    FlagSkipConfirm,
-			Target:  &c.flagSkipConfirm,
-			Default: DefaultSkipConfirm,
+			Name:    FlagAutoApprove,
+			Target:  &c.flagAutoApprove,
+			Default: DefaultAutoApprove,
 			Usage:   "Skip confirmation prompt.",
 		})
 		f.BoolVar(&flag.BoolVar{
@@ -159,21 +159,22 @@ func (c *Command) Run(args []string) int {
 	// The logger is initialized in main with the name cli. Here, we reset the name to install so log lines would be prefixed with install.
 	c.Log.ResetNamed("install")
 
-	if err := validateFlags(c, args); err != nil {
+	if err := c.validateFlags(args); err != nil {
 		c.UI.Output(err.Error())
 		return 1
 	}
 
+	// A hack to set namespace via the HELM_NAMESPACE env var until we merge a PR that will allow us to use the latest
+	// Helm templates.
+	prevHelmNSEnv := os.Getenv("HELM_NAMESPACE")
+	os.Setenv("HELM_NAMESPACE", c.flagNamespace)
 	// helmCLI.New() will create a settings object which is used by the Helm Go SDK calls.
 	// Any overrides by our kubeconfig and kubecontext flags is done here. The Kube client that
 	// is created will use this command's flags first, then the HELM_KUBECONTEXT environment variable,
 	// then call out to genericclioptions.ConfigFlag
-
-	// This hack is rather hacky.
-	prevHelmNSEnv := os.Getenv("HELM_NAMESPACE")
-	os.Setenv("HELM_NAMESPACE", c.flagNamespace)
 	settings := helmCLI.New()
 	os.Setenv("HELM_NAMESPACE", prevHelmNSEnv)
+
 	if c.flagKubeConfig != "" {
 		settings.KubeConfig = c.flagKubeConfig
 	}
@@ -214,123 +215,61 @@ func (c *Command) Run(args []string) int {
 
 	c.UI.Output("Pre-Install Checks", terminal.WithHeaderStyle())
 
-	// Need a specific action config to call helm list, where namespace is NOT specified.
-	listConfig := new(action.Configuration)
-	err = listConfig.Init(settings.RESTClientGetter(), "",
-		os.Getenv("HELM_DRIVER"), uiLogger)
+	err = c.checkForPreviousInstallations(settings, uiLogger)
 	if err != nil {
-		c.UI.Output(err.Error())
+		c.UI.Output(err.Error(), terminal.WithErrorStyle())
 		return 1
 	}
-
-	lister := action.NewList(listConfig)
-	lister.AllNamespaces = true
-	res, err := lister.Run()
-	if err != nil {
-		c.UI.Output("Error checking for installations", terminal.WithErrorStyle())
-		return 1
-	}
-	for _, rel := range res {
-		if rel.Chart.Metadata.Name == "consul" {
-			// TODO: In the future the user will be prompted with our own uninstall command.
-			c.UI.Output("Existing Consul installation found (name=%s, namespace=%s) - run helm "+
-				"delete %s -n %s if you wish to re-install",
-				rel.Name, rel.Namespace, rel.Name, rel.Namespace, terminal.WithErrorStyle())
-			return 1
-		}
-	}
-	c.UI.Output("No existing installations found", terminal.WithSuccessStyle())
 
 	// Ensure there's no previous PVCs lying around.
-	pvcs, err := c.kubernetes.CoreV1().PersistentVolumeClaims("").List(c.Ctx, metav1.ListOptions{})
+	err = c.checkForPreviousPVCs()
 	if err != nil {
-		c.UI.Output("Error listing PVCs: %v", err, terminal.WithErrorStyle())
+		c.UI.Output(err.Error(), terminal.WithErrorStyle())
 		return 1
 	}
-	var previousPVCs []string
-	for _, pvc := range pvcs.Items {
-		if strings.Contains(pvc.Name, "consul-server") {
-			previousPVCs = append(previousPVCs, fmt.Sprintf("%s/%s", pvc.Namespace, pvc.Name))
-		}
-	}
-
-	if len(previousPVCs) > 0 {
-		c.UI.Output("Found PVCs from previous installations (%s), delete before re-installing",
-			strings.Join(previousPVCs, ","), terminal.WithErrorStyle())
-		return 1
-	}
-	c.UI.Output("No previous persistent volume claims found", terminal.WithSuccessStyle())
 
 	// Ensure there's no previous bootstrap secret lying around.
-	secrets, err := c.kubernetes.CoreV1().Secrets("").List(c.Ctx, metav1.ListOptions{})
+	err = c.checkForPreviousSecrets()
 	if err != nil {
-		c.UI.Output("Error listing secrets: %v", err, terminal.WithErrorStyle())
+		c.UI.Output(err.Error(), terminal.WithErrorStyle())
 		return 1
 	}
-	for _, secret := range secrets.Items {
-		// TODO: also check for federation secret
-		if strings.Contains(secret.Name, "consul-bootstrap-acl-token") {
-			c.UI.Output("Found consul-acl-bootstrap secret from previous installations: %q in namespace %q. To delete, run kubectl delete secret %s --namespace %s",
-				secret.Name, secret.Namespace, secret.Name, secret.Namespace, terminal.WithErrorStyle())
-			return 1
-		}
-	}
-	c.UI.Output("No previous secrets found", terminal.WithSuccessStyle())
 
 	// Handle preset, value files, and set values logic.
-	p := getter.All(settings)
-	v := &values.Options{
-		ValueFiles:   c.flagValueFiles,
-		StringValues: c.flagSetStringValues,
-		Values:       c.flagSetValues,
-		FileValues:   c.flagFileValues,
-	}
-	vals, err := v.MergeValues(p)
+	vals, err := c.mergeValuesFlagsWithPrecedence(settings)
 	if err != nil {
-		c.UI.Output("Error merging values: %v", err, terminal.WithErrorStyle())
+		c.UI.Output(err.Error(), terminal.WithErrorStyle())
 		return 1
 	}
-	if c.flagPreset != DefaultPreset {
-		// Note the ordering of the function call, presets have lower precedence than set vals.
-		presetMap := presets[c.flagPreset].(map[string]interface{})
-		vals = mergeMaps(presetMap, vals)
-	}
-
-	install := action.NewInstall(actionConfig)
-	install.ReleaseName = DefaultReleaseName
-	install.Namespace = c.flagNamespace
-	install.CreateNamespace = true
-	install.ChartPathOptions.RepoURL = HelmRepository
-	install.Wait = true
-	install.Timeout = time.Minute * 10
-
-	// Dry Run should exit here, no need to actual locate/download the charts.
-	if c.flagDryRun {
-		c.UI.Output("Dry run complete - installation can proceed.", terminal.WithInfoStyle())
-	}
+	valuesYaml, err := yaml.Marshal(vals)
 
 	// Print out the installation summary.
-	if !c.flagSkipConfirm {
+	if !c.flagAutoApprove {
 		c.UI.Output("Consul Installation Summary", terminal.WithHeaderStyle())
 		c.UI.Output("Installation name: %s", DefaultReleaseName, terminal.WithInfoStyle())
 		c.UI.Output("Namespace: %s", c.flagNamespace, terminal.WithInfoStyle())
 
-		valuesYaml, err := yaml.Marshal(vals)
 		if err != nil {
 			c.UI.Output("Overrides:"+"\n"+"%+v", err, terminal.WithInfoStyle())
 		} else if len(vals) == 0 {
-			c.UI.Output("Overrides: "+string(valuesYaml), terminal.WithInfoStyle()) // TODO: Cleaner solution for this \n issue.
+			c.UI.Output("Overrides: "+string(valuesYaml), terminal.WithInfoStyle())
 		} else {
-			c.UI.Output("Overrides:"+"\n"+string(valuesYaml), terminal.WithInfoStyle()) // TODO: Cleaner solution for this \n issue.
+			c.UI.Output("Overrides:"+"\n"+string(valuesYaml), terminal.WithInfoStyle())
 		}
 	}
 
-	// Without informing the user, default global.name to consul if it hasn't been set already.
+	// Without informing the user, default global.name to consul if it hasn't been set already. We don't allow setting
+	// the release name, and since that is hardcoded to "consul", setting global.name to "consul" makes it so resources
+	// aren't double prefixed with "consul-consul-...".
 	vals = mergeMaps(convert(globalNameConsul), vals)
 
+	// Dry Run should exit here, no need to actual locate/download the charts.
 	if c.flagDryRun {
+		c.UI.Output("Dry run complete - installation can proceed.", terminal.WithInfoStyle())
 		return 0
-	} else if !c.flagSkipConfirm {
+	}
+
+	if !c.flagAutoApprove {
 		confirmation, err := c.UI.Input(&terminal.Input{
 			Prompt: "Proceed with installation? (y/n)",
 			Style:  terminal.InfoStyle,
@@ -349,6 +288,15 @@ func (c *Command) Run(args []string) int {
 	}
 
 	c.UI.Output("Running Installation", terminal.WithHeaderStyle())
+
+	// Setup the installation action.
+	install := action.NewInstall(actionConfig)
+	install.ReleaseName = DefaultReleaseName
+	install.Namespace = c.flagNamespace
+	install.CreateNamespace = true
+	install.ChartPathOptions.RepoURL = HelmRepository
+	install.Wait = true
+	install.Timeout = time.Minute * 10
 
 	// Locate the chart, install it in some cache locally.
 	chartPath, err := install.ChartPathOptions.LocateChart("consul", settings)
@@ -385,6 +333,105 @@ func (c *Command) Synopsis() string {
 	return "Install Consul on Kubernetes."
 }
 
+// checkForPreviousInstallations uses the helm Go SDK to find helm releases in all namespaces where the chart name is
+// "consul", and returns an error if there is an existing installation.
+// Note that this function is tricky to test because mocking out the action.Configuration struct requires a
+// RegistryClient field that is from an internal helm package, so we are not unit testing it.
+func (c *Command) checkForPreviousInstallations(settings *helmCLI.EnvSettings, uiLogger action.DebugLog) error {
+	// Need a specific action config to call helm list, where namespace is NOT specified.
+	listConfig := new(action.Configuration)
+	err := listConfig.Init(settings.RESTClientGetter(), "",
+		os.Getenv("HELM_DRIVER"), uiLogger)
+	if err != nil {
+		return fmt.Errorf("couldn't initialize helm config: %s", err)
+	}
+
+	lister := action.NewList(listConfig)
+	lister.AllNamespaces = true
+	res, err := lister.Run()
+	if err != nil {
+		return fmt.Errorf("couldn't check for installations: %s", err)
+	}
+
+	for _, rel := range res {
+		if rel.Chart.Metadata.Name == "consul" {
+			// TODO: In the future the user will be prompted with our own uninstall command.
+			return fmt.Errorf("existing Consul installation found (name=%s, namespace=%s) - run helm "+
+				"delete %s -n %s if you wish to re-install",
+				rel.Name, rel.Namespace, rel.Name, rel.Namespace)
+		}
+	}
+	c.UI.Output("No existing installations found", terminal.WithSuccessStyle())
+	return nil
+}
+
+// checkForPreviousPVCs checks for existing PVCs with a name containing "consul-server" and returns an error and lists
+// the PVCs it finds matches.
+func (c *Command) checkForPreviousPVCs() error {
+	pvcs, err := c.kubernetes.CoreV1().PersistentVolumeClaims("").List(c.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("error listing PVCs: %s", err)
+	}
+	var previousPVCs []string
+	for _, pvc := range pvcs.Items {
+		if strings.Contains(pvc.Name, "consul-server") {
+			previousPVCs = append(previousPVCs, fmt.Sprintf("%s/%s", pvc.Namespace, pvc.Name))
+		}
+	}
+
+	if len(previousPVCs) > 0 {
+		return fmt.Errorf("found PVCs from previous installations (%s), delete before re-installing",
+			strings.Join(previousPVCs, ","))
+	}
+	c.UI.Output("No previous persistent volume claims found", terminal.WithSuccessStyle())
+	return nil
+}
+
+// checkForPreviousSecrets checks for the bootstrap token and returns an error if found.
+func (c *Command) checkForPreviousSecrets() error {
+	secrets, err := c.kubernetes.CoreV1().Secrets("").List(c.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("error listing secrets: %s", err)
+	}
+	for _, secret := range secrets.Items {
+		// future TODO: also check for federation secret
+		if strings.Contains(secret.Name, "consul-bootstrap-acl-token") {
+			return fmt.Errorf("found consul-acl-bootstrap-token secret from previous installations: %q in namespace %q. To delete, run kubectl delete secret %s --namespace %s",
+				secret.Name, secret.Namespace, secret.Name, secret.Namespace)
+		}
+	}
+	c.UI.Output("No previous secrets found", terminal.WithSuccessStyle())
+	return nil
+}
+
+// Precedence order lowest to highest:
+// 1. -preset
+// 2. -f values-file
+// 3. -set
+// 4. -set-string
+// 5. -set-file
+// For example, -set-file will override a value provided via -set.
+// Within each of these groups the rightmost flag value has the highest precedence.
+func (c *Command) mergeValuesFlagsWithPrecedence(settings *helmCLI.EnvSettings) (map[string]interface{}, error) {
+	p := getter.All(settings)
+	v := &values.Options{
+		ValueFiles:   c.flagValueFiles,
+		StringValues: c.flagSetStringValues,
+		Values:       c.flagSetValues,
+		FileValues:   c.flagFileValues,
+	}
+	vals, err := v.MergeValues(p)
+	if err != nil {
+		return nil, fmt.Errorf("error merging values: %s", err)
+	}
+	if c.flagPreset != DefaultPreset {
+		// Note the ordering of the function call, presets have lower precedence than set vals.
+		presetMap := presets[c.flagPreset].(map[string]interface{})
+		vals = mergeMaps(presetMap, vals)
+	}
+	return vals, err
+}
+
 // This is a helper function used in Run. Merges two maps giving b precedent.
 // @source: https://github.com/helm/helm/blob/main/pkg/cli/values/options.go
 func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
@@ -407,7 +454,7 @@ func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
 }
 
 // This is a helper function that performs sanity checks on the user's provided flags.
-func validateFlags(c *Command, args []string) error {
+func (c *Command) validateFlags(args []string) error {
 	if err := c.set.Parse(args); err != nil {
 		return err
 	} else if len(c.set.Args()) > 0 {

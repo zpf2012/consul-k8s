@@ -19,6 +19,7 @@ require (
 	go.starlark.net v0.0.0-20200707032745-474f21a9602d // indirect
 	google.golang.org/grpc v1.33.1 // indirect
 	helm.sh/helm/v3 v3.6.1
+	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
 	k8s.io/client-go v0.21.2
 	rsc.io/letsencrypt v0.0.3 // indirect
