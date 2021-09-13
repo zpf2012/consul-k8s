@@ -20,6 +20,8 @@ import (
 const staticClientName = "static-client"
 const staticServerName = "static-server"
 
+// Run the following from ~/workspace/hashicorp/consul-k8s/acceptance/tests/connect
+// go test -run TestConnectInject
 // Test that Connect works in a default and a secure installation.
 func TestConnectInject(t *testing.T) {
 	cases := []struct {
@@ -51,7 +53,7 @@ func TestConnectInject(t *testing.T) {
 			args = append(args, "-set", fmt.Sprintf("global.tls.enabled=%s", strconv.FormatBool(c.secure)))
 			args = append(args, "-set", fmt.Sprintf("global.tls.enableAutoEncrypt=%s", strconv.FormatBool(c.autoEncrypt)))
 			args = append(args, "-set", fmt.Sprintf("global.acls.manageSystemACLs=%s", strconv.FormatBool(c.secure)))
-			args = append(args, "-skip-confirm")
+			args = append(args, "-auto-approve")
 			cmd := exec.Command("../../../bin/consul-k8s", args...)
 
 			out, _ := cmd.CombinedOutput()
