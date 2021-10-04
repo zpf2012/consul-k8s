@@ -12,6 +12,7 @@ import (
 	cmdGetConsulClientCA "github.com/hashicorp/consul-k8s/control-plane/subcommand/get-consul-client-ca"
 	cmdInjectConnect "github.com/hashicorp/consul-k8s/control-plane/subcommand/inject-connect"
 	cmdPartitionInit "github.com/hashicorp/consul-k8s/control-plane/subcommand/partition-init"
+	cmdRotationSidecar "github.com/hashicorp/consul-k8s/control-plane/subcommand/rotation-sidecar"
 	cmdServerACLInit "github.com/hashicorp/consul-k8s/control-plane/subcommand/server-acl-init"
 	cmdServiceAddress "github.com/hashicorp/consul-k8s/control-plane/subcommand/service-address"
 	cmdSyncCatalog "github.com/hashicorp/consul-k8s/control-plane/subcommand/sync-catalog"
@@ -31,6 +32,10 @@ func init() {
 	Commands = map[string]cli.CommandFactory{
 		"acl-init": func() (cli.Command, error) {
 			return &cmdACLInit.Command{UI: ui}, nil
+		},
+
+		"rotation-sidecar": func() (cli.Command, error) {
+			return &cmdRotationSidecar.Command{UI: ui}, nil
 		},
 
 		"connect-init": func() (cli.Command, error) {

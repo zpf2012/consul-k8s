@@ -44,6 +44,7 @@ spec:
         {{- with .Values.global.gossipEncryption }}
         "vault.hashicorp.com/agent-inject-secret-gossip.txt": "{{ .secretName }}"
         "vault.hashicorp.com/agent-inject-template-gossip.txt": '{{ "{{" }}- with secret "{{ .secretName }}" -{{ "}}" }} {{ "{{" }} {{ .secretKey }} {{ "}}" }} {{ "{{" }}- end -{{ "}}" }}'
+        "vault.hashicorp.com/template-static-secret-render-interval":  "10s"
         {{- end }}
         {{- end }}
         "consul.hashicorp.com/connect-inject": "false"

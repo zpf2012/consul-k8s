@@ -6,6 +6,7 @@ require (
 	github.com/deckarep/golang-set v1.7.1
 	github.com/digitalocean/godo v1.10.0 // indirect
 	github.com/fatih/color v1.12.0 // indirect
+	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-logr/logr v0.4.0
 	github.com/google/go-cmp v0.5.6
 	github.com/google/go-querystring v1.0.0 // indirect

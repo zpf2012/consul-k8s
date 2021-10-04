@@ -53,6 +53,7 @@ spec:
         {{- with .Values.global.gossipEncryption }}
         "vault.hashicorp.com/agent-inject-secret-gossip.txt": "{{ .secretName }}"
         "vault.hashicorp.com/agent-inject-template-gossip.txt": '{{ "{{" }}- with secret "{{ .secretName }}" -{{ "}}" }} {{ "{{" }} {{ .secretKey }} {{ "}}" }} {{ "{{" }}- end -{{ "}}" }}'
+        "vault.hashicorp.com/template-static-secret-render-interval":  "10s"
         {{- end }}
         {{- end }}
         "consul.hashicorp.com/connect-inject": "false"
@@ -136,6 +137,67 @@ spec:
       priorityClassName: {{ .Values.server.priorityClassName | quote }}
       {{- end }}
       containers:
+        - name: rotation-sidecar
+          image: {{ .Values.global.imageK8S }}
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONSUL_DISABLE_PERM_MGMT
+              value: "true"
+            {{- if .Values.global.tls.enabled }}
+            - name: CONSUL_HTTP_ADDR
+              value: https://localhost:8501
+            - name: CONSUL_CACERT
+              value: /consul/tls/ca/tls.crt
+            {{- end }}
+            {{- if (and .Values.global.acls.replicationToken.secretName .Values.global.acls.replicationToken.secretKey) }}
+            - name: ACL_REPLICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.acls.replicationToken.secretName | quote }}
+                  key: {{ .Values.global.acls.replicationToken.secretKey | quote }}
+            {{- end }}
+          command:
+            - "/bin/sh"
+            - "-ec"
+            - |
+              consul-k8s-control-plane rotation-sidecar \
+                -log-level={{ default .Values.global.logLevel .Values.connectInject.logLevel }} \
+                -log-json={{ .Values.global.logJSON }} \
+                -gossip-encryption-file=/vault/secrets/gossip.txt
+          volumeMounts:
+            - name: data-{{ .Release.Namespace }}
+              mountPath: /consul/data
+            - name: config
+              mountPath: /consul/config
+            {{- if .Values.global.tls.enabled }}
+            - name: consul-ca-cert
+              mountPath: /consul/tls/ca/
+              readOnly: true
+            - name: consul-server-cert
+              mountPath: /consul/tls/server
+              readOnly: true
+            {{- end }}
+            {{- if (and .Values.server.enterpriseLicense.secretName .Values.server.enterpriseLicense.secretKey .Values.server.enterpriseLicense.enableLicenseAutoload) }}
+            - name: consul-license
+              mountPath: /consul/license
+              readOnly: true
+            {{- end }}
+            {{- range .Values.server.extraVolumes }}
+            - name: userconfig-{{ .name }}
+              readOnly: true
+              mountPath: /consul/userconfig/{{ .name }}
+            {{- end }}
         - name: consul
           image: "{{ default .Values.global.image .Values.server.image }}"
           env:
