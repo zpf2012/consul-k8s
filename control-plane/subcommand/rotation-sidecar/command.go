@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -81,7 +82,6 @@ func (c *Command) Run(args []string) int {
 		c.logger.Error("Unable to get client connection", "error", err)
 		return 1
 	}
-
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		c.logger.Error("Unable to set watcher", "error", err)
@@ -96,24 +96,37 @@ func (c *Command) Run(args []string) int {
 	}
 	errCh := make(chan error)
 
-	data, _ := ioutil.ReadFile(c.flagGossipEncryptionFile)
-	currentChecksum := md5.Sum(data)
-	//c.logger.Error("Initial Checksum: %v", currentChecksum)
+	data, err := ioutil.ReadFile(c.flagGossipEncryptionFile)
+	if err != nil {
+		c.logger.Error("Unable to read secret file: ", "error", err)
+		return 1
+	}
 
+	podIP := os.Getenv("POD_IP")
+	currentChecksum := md5.Sum(data)
 	for {
 		select {
 		case event := <-watcher.Events:
+			leader, _ := c.consulClient.Status().Leader()
+			if leader == "" {
+				continue
+			} else if strings.Split(leader, ":")[0] != podIP {
+				continue
+			}
 			switch {
 			case event.Op&fsnotify.Remove == fsnotify.Remove:
 				err = watcher.Add(event.Name)
-				c.logger.Error("File Removed: added the watch again. %v", err)
 				fallthrough
 			case event.Op&fsnotify.Write == fsnotify.Write:
-				c.logger.Error("Write:  %s: %s, checking to see if the file changed", event.Op, event.Name)
-				data, _ := ioutil.ReadFile(c.flagGossipEncryptionFile)
+				c.logger.Info("Write detected, checking to see if the file changed", event.Op, event.Name)
+				data, err := ioutil.ReadFile(c.flagGossipEncryptionFile)
+				if err != nil {
+					c.logger.Error("Unable to read secret file: ", "error", err)
+					continue
+				}
 				checksum := md5.Sum(data)
 				if checksum != currentChecksum {
-					c.logger.Error("New Encryption Key, executing rotation: ", "key", string(data))
+					c.logger.Info("New Encryption Key, executing rotation: ", "key", string(data))
 					if err := c.installKey(string(data)); err == nil {
 						currentChecksum = checksum
 					}
@@ -129,7 +142,7 @@ func (c *Command) Run(args []string) int {
 	}
 
 	c.logger.Error("Error channel: %v", <-errCh)
-	c.logger.Error("Exiting")
+	c.logger.Info("Exiting")
 	return 0
 }
 
@@ -139,8 +152,8 @@ func (c *Command) installKey(newKey string) error {
 		c.logger.Error("unable to get old keyring list")
 		return err
 	}
-	c.logger.Error("Old primary keys ", "key", oldkeyringList[0].PrimaryKeys)
-	c.logger.Error("Installing new key: ", "key", newKey)
+	c.logger.Info("Old primary keys: ", "key", oldkeyringList[0].PrimaryKeys)
+	c.logger.Info("Installing new key: ", "key", newKey)
 	err = c.consulClient.Operator().KeyringInstall(newKey, nil)
 	if err != nil {
 		c.logger.Error("Unable to install key to keyring: ", "err", err)
@@ -150,27 +163,27 @@ func (c *Command) installKey(newKey string) error {
 		time.Sleep(1 * time.Second)
 		keyringList, err := c.consulClient.Operator().KeyringList(nil)
 		if err != nil {
-			c.logger.Error("Unable to get keyring list.")
+			c.logger.Error("Unable to get keyring list, retrying.")
 			continue
 		}
 		for x, _ := range keyringList[0].Keys {
 			if x == string(newKey) {
-				c.logger.Error("Setting new key to primary: ", "key", newKey)
+				c.logger.Info("Setting new key to primary: ", "key", newKey)
 				if err := c.consulClient.Operator().KeyringUse(newKey, nil); err != nil {
-					c.logger.Error("unable to set key to primary: ", "key", newKey, "err", err)
+					c.logger.Error("Unable to set key to primary, retrying. ", "key", newKey, "err", err)
 					continue
 				}
 			}
 		}
 		for x, _ := range keyringList[0].Keys {
 			if x != newKey {
-				c.logger.Error("Deleting Key: ", "key", x)
+				c.logger.Info("Deleting Key: ", "key", x)
 				if err := c.consulClient.Operator().KeyringRemove(x, nil); err != nil {
-					c.logger.Error("Unable to delete Key: ", "err", err)
+					c.logger.Error("Unable to delete old primary key, retrying. ", "err", err)
 				}
 			}
 		}
-		c.logger.Error("Key rotation completed: ", "key", newKey)
+		c.logger.Info("Key rotation completed: ", "key", newKey)
 		return nil
 	}
 	return nil
