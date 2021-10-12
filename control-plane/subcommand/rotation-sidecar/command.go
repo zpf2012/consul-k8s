@@ -118,7 +118,7 @@ func (c *Command) Run(args []string) int {
 				err = watcher.Add(event.Name)
 				fallthrough
 			case event.Op&fsnotify.Write == fsnotify.Write:
-				c.logger.Info("Write detected, checking to see if the file changed", event.Op, event.Name)
+				c.logger.Info("Write detected, checking to see if the file changed", "filename", event.Name)
 				data, err := ioutil.ReadFile(c.flagGossipEncryptionFile)
 				if err != nil {
 					c.logger.Error("Unable to read secret file: ", "error", err)
