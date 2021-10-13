@@ -115,7 +115,7 @@ func (h *HelmCluster) Create(t *testing.T) {
 	})
 
 	// Fail if there are any existing installations of the Helm chart.
-	h.checkForPriorInstallations(t)
+	//h.checkForPriorInstallations(t)
 
 	helm.Install(t, h.helmOptions, config.HelmChartPath, h.releaseName)
 

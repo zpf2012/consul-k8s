@@ -46,6 +46,17 @@ spec:
           {{- toYaml .Values.server.extraLabels | nindent 8 }}
         {{- end }}
       annotations:
+        {{- if .Values.secretsBackend.vault.enabled }}
+        "vault.hashicorp.com/agent-inject-token": "true"
+        "vault.hashicorp.com/agent-inject": "true"
+        "vault.hashicorp.com/agent-init-first": "true"
+        "vault.hashicorp.com/role": "{{ .Values.secretsBackend.vault.consulServerRole }}"
+        {{- with .Values.global.gossipEncryption }}
+        "vault.hashicorp.com/agent-inject-secret-gossip.txt": "{{ .secretName }}"
+        "vault.hashicorp.com/agent-inject-template-gossip.txt": '{{ "{{" }}- with secret "{{ .secretName }}" -{{ "}}" }} {{ "{{" }} {{ .secretKey }} {{ "}}" }} {{ "{{" }}- end -{{ "}}" }}'
+        "vault.hashicorp.com/template-static-secret-render-interval":  "10s"
+        {{- end }}
+        {{- end }}
         "consul.hashicorp.com/connect-inject": "false"
         "consul.hashicorp.com/config-checksum": {{ include (print $.Template.BasePath "/server-config-configmap.yaml") . | sha256sum }}
         {{- if .Values.server.annotations }}
@@ -127,6 +138,67 @@ spec:
       priorityClassName: {{ .Values.server.priorityClassName | quote }}
       {{- end }}
       containers:
+        - name: rotation-sidecar
+          image: {{ .Values.global.imageK8S }}
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONSUL_DISABLE_PERM_MGMT
+              value: "true"
+            {{- if .Values.global.tls.enabled }}
+            - name: CONSUL_HTTP_ADDR
+              value: https://localhost:8501
+            - name: CONSUL_CACERT
+              value: /consul/tls/ca/tls.crt
+            {{- end }}
+            {{- if (and .Values.global.acls.replicationToken.secretName .Values.global.acls.replicationToken.secretKey) }}
+            - name: ACL_REPLICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.acls.replicationToken.secretName | quote }}
+                  key: {{ .Values.global.acls.replicationToken.secretKey | quote }}
+            {{- end }}
+          command:
+            - "/bin/sh"
+            - "-ec"
+            - |
+              consul-k8s-control-plane rotation-sidecar \
+                -log-level={{ default .Values.global.logLevel .Values.connectInject.logLevel }} \
+                -log-json={{ .Values.global.logJSON }} \
+                -gossip-encryption-file=/vault/secrets/gossip.txt
+          volumeMounts:
+            - name: data-{{ .Release.Namespace }}
+              mountPath: /consul/data
+            - name: config
+              mountPath: /consul/config
+            {{- if .Values.global.tls.enabled }}
+            - name: consul-ca-cert
+              mountPath: /consul/tls/ca/
+              readOnly: true
+            - name: consul-server-cert
+              mountPath: /consul/tls/server
+              readOnly: true
+            {{- end }}
+            {{- if (and .Values.server.enterpriseLicense.secretName .Values.server.enterpriseLicense.secretKey .Values.server.enterpriseLicense.enableLicenseAutoload) }}
+            - name: consul-license
+              mountPath: /consul/license
+              readOnly: true
+            {{- end }}
+            {{- range .Values.server.extraVolumes }}
+            - name: userconfig-{{ .name }}
+              readOnly: true
+              mountPath: /consul/userconfig/{{ .name }}
+            {{- end }}
         - name: consul
           image: "{{ default .Values.global.image .Values.server.image }}"
           env:
@@ -156,17 +228,12 @@ spec:
                   fieldPath: metadata.namespace
             - name: CONSUL_DISABLE_PERM_MGMT
               value: "true"
-            {{- if (or .Values.global.gossipEncryption.autoGenerate (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey)) }}
+            {{- if (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey (not .Values.secretsBackend.vault.enabled)) }}
             - name: GOSSIP_KEY
               valueFrom:
                 secretKeyRef:
-                {{- if .Values.global.gossipEncryption.autoGenerate }}
-                  name: {{ template "consul.fullname" . }}-gossip-encryption-key
-                  key: key
-                {{- else if (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey) }}
                   name: {{ .Values.global.gossipEncryption.secretName }}
                   key: {{ .Values.global.gossipEncryption.secretKey }}
-                {{- end }}
             {{- end }}
             {{- if .Values.global.tls.enabled }}
             - name: CONSUL_HTTP_ADDR
@@ -191,6 +258,10 @@ spec:
             - "-ec"
             - |
               CONSUL_FULLNAME="{{template "consul.fullname" . }}"
+
+              {{- if .Values.secretsBackend.vault.enabled }}
+              GOSSIP_KEY=`cat /vault/secrets/gossip.txt`
+              {{- end }}
 
               {{ template "consul.extraconfig" }}
 
@@ -228,7 +299,7 @@ spec:
                 -datacenter={{ .Values.global.datacenter }} \
                 -data-dir=/consul/data \
                 -domain={{ .Values.global.domain }} \
-                {{- if (or .Values.global.gossipEncryption.autoGenerate (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey)) }}
+                {{- if (and .Values.global.gossipEncryption.secretName .Values.global.gossipEncryption.secretKey) }}
                 -encrypt="${GOSSIP_KEY}" \
                 {{- end }}
                 {{- if .Values.server.connect }}
