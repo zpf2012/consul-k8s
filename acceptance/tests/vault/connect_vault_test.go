@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Installs Vault, bootstraps it with secrets, policies, and kube auth method
+// then creates a gossip encryption secret and uses this to bootstrap Consul
 func TestVaultConsulGossipEncryptionKeyIntegration(t *testing.T) {
 	cfg := suite.Config()
 	ctx := suite.Environment().DefaultContext(t)
