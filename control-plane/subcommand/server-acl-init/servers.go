@@ -66,7 +66,8 @@ func (c *Command) bootstrapServers(serverAddresses []string, bootTokenSecretName
 		func() error {
 			secret := &apiv1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: bootTokenSecretName,
+					Name:   bootTokenSecretName,
+					Labels: map[string]string{"managed-by": "consul-k8s"},
 				},
 				Data: map[string][]byte{
 					common.ACLTokenSecretKey: bootstrapToken,
