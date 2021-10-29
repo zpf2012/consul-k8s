@@ -174,6 +174,20 @@ func (c *Command) init() {
 	c.Init()
 }
 
+type values struct {
+	Global global `yaml:"global"`
+	Server server `yaml:"server"`
+}
+type global struct {
+	Image string `yaml:"image"`
+}
+type server struct {
+	EnterpriseLicense enterpriseLicense `yaml:"enterpriseLicense"`
+}
+type enterpriseLicense struct {
+	SecretName string `yaml:"secretName"`
+}
+
 func (c *Command) Run(args []string) int {
 	c.once.Do(c.init)
 
@@ -266,6 +280,13 @@ func (c *Command) Run(args []string) int {
 		c.UI.Output(err.Error(), terminal.WithErrorStyle())
 		return 1
 	}
+
+	var v values
+	err := yaml.Unmarshal(valuesYaml, &v)
+	// do something with error
+
+	v.Global.Image // do some assertions
+	v.Server.EnterpriseLicense.SecretName // check that the secret exists
 
 	// Print out the installation summary.
 	if !c.flagAutoApprove {
