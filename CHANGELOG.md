@@ -9,6 +9,7 @@ IMPROVEMENTS:
   * `kube-system` and `local-path-storage` namespaces are now excluded from connect injection by default on Kubernetes versions >= 1.21. This prevents deadlock issues when `kube-system` components go down and allows Kind to work without changing the failure policy of the mutating webhook. [[GH-726](https://github.com/hashicorp/consul-k8s/pull/726)]
 * CLI
   * Add `status` command. [[GH-768](https://github.com/hashicorp/consul-k8s/pull/768)]
+  * Add a label "managed-by" to every secret the control-plane creates. Only delete said secrets on an uninstall. [[GH-835](https://github.com/hashicorp/consul-k8s/pull/835)]
 
 ## 0.35.0 (October 19, 2021)
 
