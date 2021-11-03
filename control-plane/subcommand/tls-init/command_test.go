@@ -114,7 +114,6 @@ func TestRun_UpdatesServerCertificatesWithExistingCertsAsFiles(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-server-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey:       []byte(serverCert),
@@ -175,7 +174,6 @@ func TestRun_CreatesServerCertificatesWithExistingCertsAsSecrets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -188,7 +186,6 @@ func TestRun_CreatesServerCertificatesWithExistingCertsAsSecrets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
@@ -266,7 +263,6 @@ func TestRun_UpdatesServerCertificatesWithExistingCertsAsSecrets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -279,7 +275,6 @@ func TestRun_UpdatesServerCertificatesWithExistingCertsAsSecrets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
@@ -292,7 +287,6 @@ func TestRun_UpdatesServerCertificatesWithExistingCertsAsSecrets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-server-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey:       []byte(serverCert),
@@ -341,7 +335,6 @@ func TestRun_CreatesServerCertificatesWithExpiryWithinSpecifiedDays(t *testing.T
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -354,7 +347,6 @@ func TestRun_CreatesServerCertificatesWithExpiryWithinSpecifiedDays(t *testing.T
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
@@ -388,7 +380,6 @@ func TestRun_CreatesServerCertificatesWithProvidedHosts(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -401,7 +392,6 @@ func TestRun_CreatesServerCertificatesWithProvidedHosts(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
@@ -436,7 +426,6 @@ func TestRun_CreatesServerCertificatesWithSpecifiedDomainAndDC(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -449,7 +438,6 @@ func TestRun_CreatesServerCertificatesWithSpecifiedDomainAndDC(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: "default",
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
@@ -491,7 +479,6 @@ func TestRun_CreatesServerCertificatesInSpecifiedNamespace(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-cert",
 			Namespace: namespace,
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSCertKey: []byte(caCert),
@@ -504,7 +491,6 @@ func TestRun_CreatesServerCertificatesInSpecifiedNamespace(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "consul-ca-key",
 			Namespace: namespace,
-			Labels:    map[string]string{"managed-by": "consul-k8s"},
 		},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte(caKey),
